@@ -11,6 +11,50 @@ services:
       - iot_net
     restart: unless-stopped
 
+  # ── Time-series Database (SV2) ──────────────────────────────────────────
+  influxdb:
+    image: influxdb:2.7
+    container_name: influxdb
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_USERNAME:-admin}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_PASSWORD:-admin12345}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG:-hust}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET:-iot}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_TOKEN:-dev-token-change-me}
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    networks:
+      - iot_net
+    restart: unless-stopped
+
+  # ── Edge IoT Gateway (SV2) ──────────────────────────────────────────────
+  waste-gateway:
+    build: ./iot_gateway
+    container_name: waste-gateway
+    environment:
+      GATEWAY_ID: waste-gateway
+      MQTT_BROKER: mosquitto
+      MQTT_PORT: 1883
+      INFLUXDB_URL: http://influxdb:8086
+      INFLUXDB_TOKEN: ${INFLUXDB_TOKEN:-dev-token-change-me}
+      INFLUXDB_ORG: ${INFLUXDB_ORG:-hust}
+      INFLUXDB_BUCKET: ${INFLUXDB_BUCKET:-iot}
+      # Ngưỡng rule engine — chỉnh được không cần sửa code
+      FILL_DISPATCH_THRESHOLD: 85
+      FILL_CRITICAL_THRESHOLD: 95
+      TEMP_FIRE_THRESHOLD: 60
+      METHANE_ALERT_THRESHOLD: 500
+      WEIGHT_LOCK_THRESHOLD: 60
+      SENSOR_OFFLINE_TIMEOUT: 30
+      COLLECTION_DELAY: 20
+    depends_on:
+      - mosquitto
+      - influxdb
+    networks:
+      - iot_net
+    restart: unless-stopped
+
   # ── Virtual Sensors ─────────────────────────────────────────────────────
   sensor-bin-01:
     build: ./virtual_sensor
@@ -108,6 +152,7 @@ services:
 
 volumes:
   mosquitto_data:
+  influxdb_data:
 
 networks:
   iot_net:
