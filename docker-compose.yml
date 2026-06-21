@@ -22,6 +22,8 @@ services:
       DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG:-hust}
       DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET:-iot}
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_TOKEN:-dev-token-change-me}
+    ports:
+      - "8086:8086"
     volumes:
       - influxdb_data:/var/lib/influxdb2
     networks:
