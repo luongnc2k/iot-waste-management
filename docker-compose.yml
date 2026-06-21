@@ -1,0 +1,114 @@
+services:
+
+  # ── MQTT Broker ─────────────────────────────────────────────────────────
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: mosquitto
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto_data:/mosquitto/data
+    networks:
+      - iot_net
+    restart: unless-stopped
+
+  # ── Virtual Sensors ─────────────────────────────────────────────────────
+  sensor-bin-01:
+    build: ./virtual_sensor
+    container_name: sensor-bin-01
+    environment:
+      AREA_ID: district-1
+      BIN_ID: bin-01
+      DEVICE_ID: sensor-bin-01
+      MQTT_BROKER: mosquitto
+      MQTT_PORT: 1883
+      PUBLISH_INTERVAL: 5
+    depends_on:
+      - mosquitto
+    networks:
+      - iot_net
+    restart: unless-stopped
+
+  sensor-bin-02:
+    build: ./virtual_sensor
+    container_name: sensor-bin-02
+    environment:
+      AREA_ID: district-1
+      BIN_ID: bin-02
+      DEVICE_ID: sensor-bin-02
+      MQTT_BROKER: mosquitto
+      MQTT_PORT: 1883
+      PUBLISH_INTERVAL: 5
+    depends_on:
+      - mosquitto
+    networks:
+      - iot_net
+    restart: unless-stopped
+
+  sensor-bin-03:
+    build: ./virtual_sensor
+    container_name: sensor-bin-03
+    environment:
+      AREA_ID: district-1
+      BIN_ID: bin-03
+      DEVICE_ID: sensor-bin-03
+      MQTT_BROKER: mosquitto
+      MQTT_PORT: 1883
+      PUBLISH_INTERVAL: 7
+    depends_on:
+      - mosquitto
+    networks:
+      - iot_net
+    restart: unless-stopped
+
+  # ── Virtual Actuators ───────────────────────────────────────────────────
+  actuator-bin-01:
+    build: ./virtual_actuator
+    container_name: actuator-bin-01
+    environment:
+      AREA_ID: district-1
+      BIN_ID: bin-01
+      DEVICE_ID: actuator-bin-01
+      MQTT_BROKER: mosquitto
+      MQTT_PORT: 1883
+    depends_on:
+      - mosquitto
+    networks:
+      - iot_net
+    restart: unless-stopped
+
+  actuator-bin-02:
+    build: ./virtual_actuator
+    container_name: actuator-bin-02
+    environment:
+      AREA_ID: district-1
+      BIN_ID: bin-02
+      DEVICE_ID: actuator-bin-02
+      MQTT_BROKER: mosquitto
+      MQTT_PORT: 1883
+    depends_on:
+      - mosquitto
+    networks:
+      - iot_net
+    restart: unless-stopped
+
+  actuator-bin-03:
+    build: ./virtual_actuator
+    container_name: actuator-bin-03
+    environment:
+      AREA_ID: district-1
+      BIN_ID: bin-03
+      DEVICE_ID: actuator-bin-03
+      MQTT_BROKER: mosquitto
+      MQTT_PORT: 1883
+    depends_on:
+      - mosquitto
+    networks:
+      - iot_net
+    restart: unless-stopped
+
+volumes:
+  mosquitto_data:
+
+networks:
+  iot_net:
+    driver: bridge
