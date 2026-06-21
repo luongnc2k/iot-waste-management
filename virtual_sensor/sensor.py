@@ -58,6 +58,15 @@ PUBLISH_INTERVAL = float(os.environ.get("PUBLISH_INTERVAL", "5"))
 # Chu kỳ publish dữ liệu (giây). Giá trị nhỏ → dữ liệu dày đặc hơn
 # nhưng tốn băng thông. Trong lab dùng 2–5s để thấy kết quả nhanh.
 
+KG_PER_FILL_PERCENT = 0.8
+# Hệ số quy đổi mức đầy (%) → khối lượng (kg). Mô phỏng rác ẩm/đặc.
+# QUAN TRỌNG: phải đủ lớn để thùng gần đầy vượt được các ngưỡng của rule engine.
+#   - tilt:       weight > 55 kg  → cần fill > 68.75%
+#   - overweight: weight > 60 kg  → cần fill > 75%
+# Nếu để 0.5 như trước, weight tối đa chỉ ~50 kg (ở fill=100%) → hai tình huống
+# overweight và tilt KHÔNG BAO GIỜ xảy ra, rule engine SV2 không kích hoạt được.
+# Với 0.8, thùng đầy 100% ≈ 80 kg → cả hai ngưỡng đều đạt tới khi thùng gần đầy.
+
 # Topic publish telemetry — cố định sau khi đọc BIN_ID từ env.
 # Pattern: waste/{bin_id}/sensor/telemetry
 # Gateway subscribe: waste/+/sensor/telemetry  (+ là wildcard 1 cấp)
@@ -83,7 +92,7 @@ class BinState:
         # nếu cả 3 bắt đầu ở 0%, chúng sẽ đạt ngưỡng cùng lúc,
         # gây "giả" tắc nghẽn dispatch cùng một thời điểm.
         self.fill_level = random.uniform(5.0, 20.0)     # % mức đầy (0–100)
-        self.weight_kg  = self.fill_level * 0.5         # kg; tỉ lệ ~0.5 kg/1% fill
+        self.weight_kg  = self.fill_level * KG_PER_FILL_PERCENT  # kg; xem hằng số ở trên
         self.methane_ppm = random.uniform(50.0, 150.0)  # ppm; nền tối thiểu ~50 ppm
         self.temperature = random.uniform(28.0, 35.0)   # °C; nhiệt độ môi trường
         self.lid_status  = "closed"                     # "open" | "closed"
@@ -118,7 +127,7 @@ class BinState:
         self.fill_level = max(0.0, min(100.0, self.fill_level))  # clamp về [0, 100]
 
         # Cân nặng tỉ lệ thuận với mức đầy + nhiễu nhỏ (sai số cân)
-        self.weight_kg = self.fill_level * 0.5 + random.gauss(0, 0.3)
+        self.weight_kg = self.fill_level * KG_PER_FILL_PERCENT + random.gauss(0, 0.3)
         self.weight_kg = max(0.0, self.weight_kg)       # cân nặng không âm
 
     def _simulate_methane(self):
@@ -233,7 +242,7 @@ class BinState:
         Giá trị 0% tuyệt đối sẽ trông không tự nhiên.
         """
         self.fill_level  = random.uniform(0.5, 3.0)
-        self.weight_kg   = self.fill_level * 0.5
+        self.weight_kg   = self.fill_level * KG_PER_FILL_PERCENT
         self.methane_ppm = random.uniform(50, 100)      # về gần nền không khí
         self.temperature = random.uniform(28, 33)       # nhiệt độ bình thường
         self.tilt        = False                        # thùng được đặt lại thẳng
@@ -336,17 +345,22 @@ def on_message(_client, userdata, msg):
         print(f"[{DEVICE_ID}] Lỗi parse message reset: {e}")
 
 
-def on_disconnect(_client, _userdata, rc, _properties=None):
+def on_disconnect(_client, _userdata, _flags, reason_code, _properties=None):
     """
     Callback khi mất kết nối MQTT broker.
 
-    rc=0: disconnect chủ động (client.disconnect() được gọi) — bình thường.
-    rc≠0: mất kết nối đột ngột (network error, broker restart) — sẽ tự reconnect.
+    Chữ ký 5 tham số bắt buộc với CallbackAPIVersion.VERSION2 — paho gọi
+    on_disconnect(client, userdata, disconnect_flags, reason_code, properties).
+    Nếu thiếu tham số (chỉ 4), paho ném TypeError và nuốt im lặng → log này
+    không bao giờ in ra khi mất kết nối.
+
+    reason_code=0 (Success): disconnect chủ động — bình thường.
+    reason_code≠0: mất kết nối đột ngột (network error, broker restart) — tự reconnect.
 
     paho-mqtt với loop_start() tự động reconnect sau on_disconnect.
     Callback này chỉ để log, không cần xử lý thêm.
     """
-    print(f"[{DEVICE_ID}] Mất kết nối MQTT (rc={rc}), đang thử kết nối lại...")
+    print(f"[{DEVICE_ID}] Mất kết nối MQTT (rc={reason_code}), đang thử kết nối lại...")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

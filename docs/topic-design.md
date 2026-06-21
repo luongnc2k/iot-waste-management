@@ -128,7 +128,7 @@ Sau thu gom: fill= 1.5%  ← reset
   "area_id":     "district-1",
   "bin_id":      "bin-01",
   "fill_level":  88.0,
-  "weight_kg":   42.5,
+  "weight_kg":   70.4,
   "methane_ppm": 350.0,
   "temperature": 33.0,
   "lid_status":  "closed",
@@ -140,7 +140,7 @@ Sau thu gom: fill= 1.5%  ← reset
 | Field | Kiểu | Đơn vị | Ý nghĩa |
 |---|---|---|---|
 | `fill_level` | float | % | Mức đầy (0–100), tăng dần theo thời gian |
-| `weight_kg` | float | kg | Khối lượng rác (~0.5 kg mỗi % mức đầy) |
+| `weight_kg` | float | kg | Khối lượng rác (~0.8 kg mỗi % mức đầy → đầy 100% ≈ 80 kg) |
 | `methane_ppm` | float | ppm | Nồng độ khí methane (nguy hiểm nếu > 500) |
 | `temperature` | float | °C | Nhiệt độ trong thùng (nguy hiểm nếu > 60) |
 | `lid_status` | string | — | `"open"` hoặc `"closed"` |

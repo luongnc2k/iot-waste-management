@@ -283,12 +283,17 @@ def on_message(client, _userdata, msg):
         print(f"[{DEVICE_ID}] Lỗi xử lý command: {e}")
 
 
-def on_disconnect(_client, _userdata, rc, _properties=None):
+def on_disconnect(_client, _userdata, _flags, reason_code, _properties=None):
     """
     Callback khi mất kết nối MQTT broker.
 
-    rc=0: disconnect chủ động (gọi client.disconnect()) — bình thường.
-    rc≠0: mất kết nối đột ngột — paho với loop_forever() tự reconnect.
+    Chữ ký 5 tham số bắt buộc với CallbackAPIVersion.VERSION2 — paho gọi
+    on_disconnect(client, userdata, disconnect_flags, reason_code, properties).
+    Nếu thiếu tham số (chỉ 4), paho ném TypeError và nuốt im lặng → log này
+    không bao giờ in ra khi mất kết nối.
+
+    reason_code=0 (Success): disconnect chủ động — bình thường.
+    reason_code≠0: mất kết nối đột ngột — paho với loop_forever() tự reconnect.
 
     Actuator không cần lưu state xuống disk vì:
     - State hiện tại đã được publish lên TOPIC_STATUS rồi (broker lưu
@@ -296,7 +301,7 @@ def on_disconnect(_client, _userdata, rc, _properties=None):
     - Sau reconnect, gateway sẽ gửi lại lệnh cần thiết nếu hệ thống
       detect actuator offline qua heartbeat timeout.
     """
-    print(f"[{DEVICE_ID}] Mất kết nối MQTT (rc={rc}), đang thử kết nối lại...")
+    print(f"[{DEVICE_ID}] Mất kết nối MQTT (rc={reason_code}), đang thử kết nối lại...")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
