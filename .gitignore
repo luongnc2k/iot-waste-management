@@ -1,0 +1,30 @@
+# File cấu hình thực (chứa token thật) — KHÔNG commit
+.env
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# macOS
+.DS_Store
+
+# File đề bài (PDF lớn, không thuộc source code)
+docs/*.pdf
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Docker volumes (dữ liệu runtime, không thuộc source code)
+mosquitto/data/
+influxdb_data/
+grafana_data/
