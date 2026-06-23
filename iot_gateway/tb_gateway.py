@@ -7,6 +7,7 @@ Kết nối local MQTT broker với ThingsBoard Cloud qua ThingsBoard Gateway MQ
 """
 import json
 import os
+import signal
 import time
 import threading
 from datetime import datetime, timezone
@@ -130,9 +131,20 @@ def tb_on_connect(client, userdata, flags, rc):
     if rc == 0:
         print("[tb-gateway] Connected to ThingsBoard Cloud")
         client.subscribe("v1/gateway/rpc", qos=1)
-        client.subscribe("v1/gateway/attributes", qos=1)
-        # Request current shared attributes on connect
-        client.publish("v1/gateway/attributes/request", json.dumps({"sharedKeys": "fill_dispatch,fill_critical,temp_fire,methane_alert,weight_lock"}))
+        client.subscribe("v1/gateway/attributes", qos=1)         # push update của sub-device
+        client.subscribe("v1/devices/me/attributes", qos=1)      # push update của gateway-device chính nó
+        client.subscribe("v1/devices/me/attributes/response/+", qos=1)
+        # Ngưỡng cấu hình (fill_dispatch, temp_fire, ...) là Shared Attributes
+        # của CHÍNH device gateway (waste-gateway), không phải của sub-device
+        # nào — nên phải dùng API "v1/devices/me/..." (request/response của
+        # device đang connect), KHÔNG phải "v1/gateway/attributes/request"
+        # (API đó dành cho xin attributes của một sub-device cụ thể, yêu cầu
+        # payload {"id":..,"device":..,"keys":[...]}; gửi sai format như cũ
+        # khiến ThingsBoard ngắt kết nối ngay sau mỗi lần connect — xem
+        # SV3-Tasks.md mục bug "tb-gateway flapping disconnect rc=7").
+        client.publish("v1/devices/me/attributes/request/1", json.dumps({
+            "sharedKeys": "fill_dispatch,fill_critical,temp_fire,methane_alert,weight_lock"
+        }))
     else:
         print(f"[tb-gateway] TB connection failed, rc={rc}")
 
@@ -142,7 +154,7 @@ def tb_on_message(client, userdata, msg):
     try:
         payload = json.loads(msg.payload.decode())
 
-        if "v1/gateway/attributes" in msg.topic:
+        if msg.topic.startswith("v1/gateway/attributes") or msg.topic.startswith("v1/devices/me/attributes"):
             _handle_shared_attributes(userdata, payload)
             return
 
@@ -288,6 +300,14 @@ def main():
 
     local_client.loop_start()
     tb_client.loop_start()
+
+    # `docker stop`/compose recreate gửi SIGTERM, không phải SIGINT — nếu chỉ
+    # bắt KeyboardInterrupt thì SIGTERM sẽ kill tiến trình ngay, không gửi
+    # MQTT DISCONNECT sạch. ThingsBoard giữ session "ma" tới hết keepalive,
+    # khiến lần kết nối kế tiếp bị kick liên tục (flapping rc=7 đã gặp khi
+    # debug). Raise KeyboardInterrupt từ signal handler để tái dùng đúng
+    # nhánh dọn dẹp try/except/finally bên dưới.
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
 
     print("[tb-gateway] Running. Press Ctrl+C to stop.")
     try:

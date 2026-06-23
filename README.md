@@ -118,13 +118,33 @@ curl -X POST http://localhost:8001/bins/bin-01/command \
 
 ### ThingsBoard (tùy chọn)
 
-```bash
-# Thêm token vào .env
-echo "TB_GATEWAY_TOKEN=your_token_here" >> .env
+`.env.example` không chứa token thật (mỗi người tự tạo gateway device riêng trên
+ThingsBoard Cloud của mình). Làm theo 5 bước sau:
 
-# Chạy với profile thingsboard
-docker compose --profile thingsboard up -d --build tb-gateway
-```
+1. Đăng ký/đăng nhập https://thingsboard.cloud (free tier đủ dùng cho lab).
+2. **Devices** → nút **+** → **Add new device** → Name: `waste-gateway` → bật
+   toggle **Is gateway** → **Add**.
+3. Mở device `waste-gateway` vừa tạo → tab **Credentials** → **Copy access token**.
+4. Dán token vào `.env`:
+   ```bash
+   echo "TB_GATEWAY_TOKEN=<token_vừa_copy>" >> .env
+   ```
+5. Đảm bảo stack chính đang chạy (`docker compose up -d`), rồi chạy `tb-gateway`:
+   ```bash
+   docker compose --profile thingsboard up -d --build tb-gateway
+   docker logs -f tb-gateway   # phải thấy "Connected to ThingsBoard Cloud"
+                               # và "Connected device: bin-01/02/03", KHÔNG có
+                               # dòng "TB disconnected" lặp lại liên tục
+   ```
+
+**Kiểm tra kết quả:** vào lại ThingsBoard Cloud → **Devices** → 3 device con
+`bin-01`, `bin-02`, `bin-03` phải tự xuất hiện dưới `waste-gateway` (vài giây sau
+khi sensor publish lần đầu). Click vào một bin → tab **Latest telemetry** → thấy
+`fill_level`, `weight_kg`, `methane_ppm`, `temperature` cập nhật mỗi ~10s.
+
+Nếu log lặp `Connected` → `TB disconnected (rc=7)` liên tục mỗi 1-2s: đó là dấu
+hiệu phiên bản cũ chưa vá bug "shared attributes request sai format" — đảm bảo
+đang chạy code mới nhất của nhánh `sv3-thingsboard-restapi` (xem `SV3-Tasks.md`).
 
 ## Dọn dẹp
 
