@@ -46,6 +46,8 @@ from influx_writer import InfluxWriter
 GATEWAY_ID  = os.environ.get("GATEWAY_ID", "waste-gateway")
 MQTT_BROKER = os.environ.get("MQTT_BROKER", "mosquitto")
 MQTT_PORT   = int(os.environ.get("MQTT_PORT", "1883"))
+MQTT_USER   = os.environ.get("MQTT_USER", "")
+MQTT_PASS   = os.environ.get("MQTT_PASS", "")
 
 INFLUXDB_URL    = os.environ.get("INFLUXDB_URL", "http://influxdb:8086")
 INFLUXDB_TOKEN  = os.environ.get("INFLUXDB_TOKEN", "")
@@ -75,6 +77,21 @@ MAINTENANCE_INTERVAL = float(os.environ.get("MAINTENANCE_INTERVAL", "5"))
 # Wildcard subscribe — 1 lệnh bắt mọi thùng (lý do thiết kế topic của SV1).
 TOPIC_TELEMETRY_WILDCARD = "waste/+/sensor/telemetry"
 TOPIC_STATUS_WILDCARD    = "waste/+/actuator/status"
+
+# Topic config runtime — REST API (SV3 POST /config) và ThingsBoard Shared
+# Attributes (qua tb_gateway.py) đều publish ngưỡng mới (retained) lên đây.
+# Gateway subscribe để chỉnh THRESHOLDS không cần restart container (§5.17.3).
+TOPIC_CONFIG = "waste/gateway/config"
+
+# Mapping tên biến môi trường ↔ field của Thresholds — dùng để áp dụng
+# update runtime từ payload {"thresholds": {"FILL_DISPATCH_THRESHOLD": 80, ...}}.
+_THRESHOLD_ENV_TO_FIELD = {
+    "FILL_DISPATCH_THRESHOLD":  "fill_dispatch",
+    "FILL_CRITICAL_THRESHOLD":  "fill_critical",
+    "TEMP_FIRE_THRESHOLD":      "temp_fire",
+    "METHANE_ALERT_THRESHOLD":  "methane_alert",
+    "WEIGHT_LOCK_THRESHOLD":    "weight_lock",
+}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -219,6 +236,36 @@ def handle_status(store: StateStore, influx: InfluxWriter, topic: str, status: d
     influx.write_actuator_status(bin_id, status)
 
 
+def handle_config_update(payload: dict):
+    """
+    Áp dụng ngưỡng rule engine mới (runtime, không cần restart container).
+
+    Nguồn payload (§5.17.3, hoàn thiện vòng lặp SV3 đã thiết kế nhưng chưa
+    đấu nối — REST API POST /config và ThingsBoard Shared Attributes qua
+    tb_gateway.py đều publish (retained) lên TOPIC_CONFIG, trước đây không
+    có ai subscribe nên không có tác dụng thật):
+      {"thresholds": {"TEMP_FIRE_THRESHOLD": 55, "WEIGHT_LOCK_THRESHOLD": 50}}
+
+    Bỏ qua key không thuộc _THRESHOLD_ENV_TO_FIELD và giá trị không ép được
+    về float — không để một payload sai làm rule engine crash.
+    THRESHOLDS là dataclass mutable dùng chung với evaluate(), nên setattr
+    ở đây có hiệu lực ngay từ bản telemetry kế tiếp.
+    """
+    updates = payload.get("thresholds", {})
+    applied = {}
+    for env_key, value in updates.items():
+        field = _THRESHOLD_ENV_TO_FIELD.get(env_key)
+        if field is None:
+            continue
+        try:
+            setattr(THRESHOLDS, field, float(value))
+            applied[field] = float(value)
+        except (TypeError, ValueError):
+            print(f"[{GATEWAY_ID}] Bỏ qua threshold không hợp lệ {env_key}={value!r}")
+    if applied:
+        print(f"[{GATEWAY_ID}] CONFIG cập nhật ngưỡng runtime: {applied}")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # VÒNG LẶP BẢO TRÌ (main thread): offline-detect + mô phỏng thu gom
 # ══════════════════════════════════════════════════════════════════════════════
@@ -263,7 +310,8 @@ def on_connect(client, _userdata, _flags, rc, _properties=None):
         # Subscribe trong on_connect để tái lập sau reconnect (như SV1).
         client.subscribe(TOPIC_TELEMETRY_WILDCARD, qos=1)
         client.subscribe(TOPIC_STATUS_WILDCARD, qos=1)
-        print(f"[{GATEWAY_ID}] Subscribe: {TOPIC_TELEMETRY_WILDCARD} , {TOPIC_STATUS_WILDCARD}")
+        client.subscribe(TOPIC_CONFIG, qos=1)
+        print(f"[{GATEWAY_ID}] Subscribe: {TOPIC_TELEMETRY_WILDCARD} , {TOPIC_STATUS_WILDCARD} , {TOPIC_CONFIG}")
     else:
         print(f"[{GATEWAY_ID}] Kết nối thất bại, rc={rc}")
 
@@ -286,6 +334,8 @@ def on_message(client, userdata, msg):
             handle_telemetry(client, store, influx, msg.topic, payload)
         elif msg.topic.endswith("/actuator/status"):
             handle_status(store, influx, msg.topic, payload)
+        elif msg.topic == TOPIC_CONFIG:
+            handle_config_update(payload)
     except Exception as e:
         # Không để một message lỗi làm chết MQTT loop.
         print(f"[{GATEWAY_ID}] Lỗi xử lý {msg.topic}: {e}")
@@ -314,6 +364,8 @@ def main():
     client.on_disconnect = on_disconnect
 
     print(f"[{GATEWAY_ID}] Khởi động — kết nối {MQTT_BROKER}:{MQTT_PORT}")
+    if MQTT_USER:
+        client.username_pw_set(MQTT_USER, MQTT_PASS)
     while True:
         try:
             client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)

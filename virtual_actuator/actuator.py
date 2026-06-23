@@ -48,6 +48,8 @@ MQTT_BROKER = os.environ.get("MQTT_BROKER", "mosquitto")
 # Tên service trong Docker network — KHÔNG dùng "localhost".
 
 MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
+MQTT_USER = os.environ.get("MQTT_USER", "")
+MQTT_PASS = os.environ.get("MQTT_PASS", "")
 
 # Topic actuator lắng nghe lệnh từ gateway
 TOPIC_COMMAND = f"waste/{BIN_ID}/actuator/command"
@@ -332,6 +334,8 @@ def main():
 
     # Retry loop: chờ mosquitto sẵn sàng (Docker startup race condition)
     print(f"[{DEVICE_ID}] Khởi động — kết nối {MQTT_BROKER}:{MQTT_PORT}")
+    if MQTT_USER:
+        client.username_pw_set(MQTT_USER, MQTT_PASS)
     while True:
         try:
             client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
