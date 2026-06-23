@@ -54,6 +54,9 @@ MQTT_BROKER = os.environ.get("MQTT_BROKER", "mosquitto")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
 # Port mặc định của MQTT (unencrypted). Port 8883 dùng cho MQTT/TLS.
 
+MQTT_USER = os.environ.get("MQTT_USER", "")
+MQTT_PASS = os.environ.get("MQTT_PASS", "")
+
 PUBLISH_INTERVAL = float(os.environ.get("PUBLISH_INTERVAL", "5"))
 # Chu kỳ publish dữ liệu (giây). Giá trị nhỏ → dữ liệu dày đặc hơn
 # nhưng tốn băng thông. Trong lab dùng 2–5s để thấy kết quả nhanh.
@@ -403,6 +406,8 @@ def main():
     # Cần thiết vì Docker Compose khởi động các container gần như đồng thời —
     # sensor có thể start trước khi mosquitto sẵn sàng nhận kết nối.
     print(f"[{DEVICE_ID}] Khởi động — kết nối {MQTT_BROKER}:{MQTT_PORT}")
+    if MQTT_USER:
+        client.username_pw_set(MQTT_USER, MQTT_PASS)
     while True:
         try:
             client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
