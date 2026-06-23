@@ -1,0 +1,108 @@
+{
+  "type": "ALARM",
+  "name": "Warning Device Alarm",
+  "debugSettings": null,
+  "configurationVersion": 0,
+  "configuration": {
+    "type": "ALARM",
+    "arguments": {
+      "severity": {
+        "refEntityKey": {
+          "key": "alarm_severity",
+          "type": "TS_LATEST"
+        }
+      },
+      "type": {
+        "refEntityKey": {
+          "key": "alarm_type",
+          "type": "TS_LATEST"
+        }
+      },
+      "value": {
+        "refEntityKey": {
+          "key": "alarm_value",
+          "type": "TS_LATEST"
+        }
+      }
+    },
+    "createRules": {
+      "WARNING": {
+        "condition": {
+          "type": "SIMPLE",
+          "expression": {
+            "type": "SIMPLE",
+            "filters": [
+              {
+                "argument": "severity",
+                "valueType": "STRING",
+                "operation": "AND",
+                "predicates": [
+                  {
+                    "type": "STRING",
+                    "operation": "EQUAL",
+                    "value": {
+                      "staticValue": "warning",
+                      "dynamicValueArgument": null
+                    },
+                    "ignoreCase": false
+                  }
+                ]
+              }
+            ],
+            "operation": "AND"
+          },
+          "schedule": null
+        },
+        "alarmDetails": "Phát hiện sự cố WARNING: ${type} (Giá trị: ${value})",
+        "dashboardId": null
+      }
+    },
+    "clearRule": {
+      "condition": {
+        "type": "SIMPLE",
+        "expression": {
+          "type": "SIMPLE",
+          "filters": [
+            {
+              "argument": "severity",
+              "valueType": "STRING",
+              "operation": "OR",
+              "predicates": [
+                {
+                  "type": "STRING",
+                  "operation": "NOT_EQUAL",
+                  "value": {
+                    "staticValue": "warning",
+                    "dynamicValueArgument": null
+                  },
+                  "ignoreCase": false
+                },
+                {
+                  "type": "NO_DATA",
+                  "unit": "SECONDS",
+                  "duration": {
+                    "staticValue": 60,
+                    "dynamicValueArgument": null
+                  }
+                }
+              ]
+            }
+          ],
+          "operation": "AND"
+        },
+        "schedule": null
+      },
+      "alarmDetails": null,
+      "dashboardId": null
+    },
+    "propagate": false,
+    "propagateToOwner": false,
+    "propagateToOwnerHierarchy": false,
+    "propagateToTenant": false,
+    "propagateRelationTypes": null,
+    "output": null
+  },
+  "additionalInfo": {
+    "aiGenerated": true
+  }
+}
