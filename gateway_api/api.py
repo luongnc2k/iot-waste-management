@@ -2,6 +2,7 @@ import json
 import os
 import time
 from datetime import datetime, timezone
+from typing import Optional
 
 import paho.mqtt.client as mqtt
 from fastapi import FastAPI, HTTPException
@@ -52,11 +53,14 @@ class CommandRequest(BaseModel):
 
 
 class ThresholdConfig(BaseModel):
-    fill_dispatch: float = None
-    fill_critical: float = None
-    temp_fire: float = None
-    methane_alert: float = None
-    weight_lock: float = None
+    # Optional[float] (không phải "float = None") — Pydantic v2 coi "float = None"
+    # là field bắt buộc kiểu float với default None, nên client gửi tường minh
+    # {"fill_critical": null} sẽ bị 422 validation error thay vì được bỏ qua.
+    fill_dispatch: Optional[float] = None
+    fill_critical: Optional[float] = None
+    temp_fire: Optional[float] = None
+    methane_alert: Optional[float] = None
+    weight_lock: Optional[float] = None
 
 
 @app.get("/health")
