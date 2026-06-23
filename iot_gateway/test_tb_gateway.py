@@ -5,7 +5,9 @@ Chạy: python -m unittest discover -s iot_gateway -p "test_*.py" -v
 Chỉ test các hàm THUẦN (rpc_to_command, build_*, map_shared_attributes) — không
 cần MQTT/ThingsBoard thật, cùng triết lý với test_rule_engine.py của SV2.
 """
+import json
 import unittest
+from unittest import mock
 
 from tb_gateway import (
     rpc_action_from_params,
@@ -14,6 +16,7 @@ from tb_gateway import (
     build_alarm_values,
     build_gateway_telemetry,
     map_shared_attributes,
+    tb_on_connect,
 )
 
 
@@ -131,6 +134,51 @@ class TestMapSharedAttributes(unittest.TestCase):
 
     def test_empty_payload_returns_empty_dict(self):
         self.assertEqual(map_shared_attributes({}), {})
+
+
+class TestTbOnConnect(unittest.TestCase):
+    """
+    Regression test cho bug 'flapping disconnect rc=7' phát hiện khi test thật
+    trên Docker: tb_on_connect publish "v1/gateway/attributes/request" với
+    payload {"sharedKeys": ...} — sai API (đó là format của API "device chính
+    nó", phải gửi qua topic "v1/devices/me/attributes/request/{id}"). ThingsBoard
+    nhận message sai format và disconnect ngay sau mỗi lần connect. Test này
+    không cần ThingsBoard thật — chỉ assert đúng topic/payload được gọi.
+    """
+
+    def test_requests_attributes_via_device_level_topic_not_gateway_level(self):
+        client = mock.MagicMock()
+        tb_on_connect(client, userdata={}, flags={}, rc=0)
+
+        published_topics = [call.args[0] for call in client.publish.call_args_list]
+        self.assertIn("v1/devices/me/attributes/request/1", published_topics)
+        self.assertNotIn("v1/gateway/attributes/request", published_topics)
+
+    def test_subscribes_to_response_and_push_topics(self):
+        client = mock.MagicMock()
+        tb_on_connect(client, userdata={}, flags={}, rc=0)
+
+        subscribed_topics = [call.args[0] for call in client.subscribe.call_args_list]
+        self.assertIn("v1/devices/me/attributes", subscribed_topics)
+        self.assertIn("v1/devices/me/attributes/response/+", subscribed_topics)
+        self.assertIn("v1/gateway/rpc", subscribed_topics)
+
+    def test_request_payload_uses_shared_keys_format(self):
+        client = mock.MagicMock()
+        tb_on_connect(client, userdata={}, flags={}, rc=0)
+
+        for call in client.publish.call_args_list:
+            if call.args[0] == "v1/devices/me/attributes/request/1":
+                payload = json.loads(call.args[1])
+                self.assertIn("sharedKeys", payload)
+                return
+        self.fail("Không tìm thấy publish lên v1/devices/me/attributes/request/1")
+
+    def test_failed_connect_does_not_subscribe_or_publish(self):
+        client = mock.MagicMock()
+        tb_on_connect(client, userdata={}, flags={}, rc=5)  # rc != 0: connect thất bại
+        client.subscribe.assert_not_called()
+        client.publish.assert_not_called()
 
 
 if __name__ == "__main__":
