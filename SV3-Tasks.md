@@ -45,6 +45,8 @@ bạn cùng nhóm làm SV2 biết** trước khi merge, tránh xung đột với
 | `iot_gateway/tb_gateway.py` | `main()` tạo `local_client = mqtt.Client(...)` **hai lần liên tiếp** — bản đầu (có `reconnect_delay_set(min_delay=1, max_delay=10)`) bị đè mất, dùng bản hai (reconnect delay mặc định của paho). Rõ ràng là artifact copy-paste. | Xoá block tạo lại, giữ bản có cấu hình reconnect. |
 | `gateway_api/api.py` | `ThresholdConfig` khai báo `fill_dispatch: float = None` (không phải `Optional[float]`). Với Pydantic v2, client gửi tường minh `{"fill_critical": null}` → **422 validation error** thay vì được coi là "không cung cấp" (khác hành vi Pydantic v1 mà code có vẻ được viết theo). | Đổi cả 5 field sang `Optional[float] = None`. |
 | `README.md` | 6 chỗ ghi `http://localhost:8000/...` cho REST API, nhưng `docker-compose.yml` map `"8001:8000"` (do bạn đổi port lúc port 8000 bị Docker khác chiếm trên máy). Ai theo README sẽ gọi nhầm port. | Đổi toàn bộ thành `localhost:8001`. |
+| `iot_gateway/tb_gateway.py` | **Phát hiện khi test thật trên Docker** (không lộ ra khi chỉ chạy unit test mock): `tb_on_connect` gửi `client.publish("v1/gateway/attributes/request", {"sharedKeys": "..."})` — sai API. Topic `v1/gateway/attributes/request` là API xin attributes của một **sub-device cụ thể** (cần `{"id","device","keys"}`), còn payload `{"sharedKeys":...}` là format của API **device chính nó** (`v1/devices/me/attributes/request/{id}`). ThingsBoard nhận message sai format và disconnect ngay sau mỗi lần connect → vòng lặp connect/disconnect (rc=7) mỗi ~1.5s, không bao giờ giữ được kết nối ổn định. | Đổi sang đúng topic `v1/devices/me/attributes/request/1` + subscribe `v1/devices/me/attributes` (push) và `v1/devices/me/attributes/response/+`. Đã verify chạy ổn định >30s không disconnect, 3 sub-device connect thành công. |
+| `iot_gateway/tb_gateway.py` | `main()` chỉ bắt `KeyboardInterrupt` (SIGINT) trong `try/except/finally` dọn dẹp kết nối. `docker stop`/compose recreate gửi **SIGTERM**, không phải SIGINT → process bị kill thẳng, không gửi MQTT DISCONNECT sạch tới ThingsBoard, để lại session "ma" có thể góp phần gây flapping ở lần connect kế tiếp. | Thêm `signal.signal(signal.SIGTERM, ...)` raise `KeyboardInterrupt` để tái dùng đúng nhánh dọn dẹp đã có. |
 
 ## 4. Test đã viết (mới — chưa từng có cho phần SV3)
 
@@ -52,10 +54,12 @@ Trước phiên này, **chỉ SV2 có unit test** (`iot_gateway/test_rule_engine
 (REST API, ThingsBoard bridge) chưa có test nào. Đã bổ sung 3 file, theo đúng triết lý
 "pure function, không cần broker/DB thật" mà `rule_engine.py` đã đặt ra:
 
-- **`iot_gateway/test_tb_gateway.py`** (23 test) — tách 5 hàm thuần khỏi `tb_gateway.py`
+- **`iot_gateway/test_tb_gateway.py`** (27 test) — tách 5 hàm thuần khỏi `tb_gateway.py`
   (`rpc_to_command`, `rpc_action_from_params`, `build_telemetry_values`,
   `build_alarm_values`, `build_gateway_telemetry`, `map_shared_attributes`) để test logic
-  chuyển đổi RPC/telemetry/shared-attributes độc lập với MQTT/ThingsBoard thật.
+  chuyển đổi RPC/telemetry/shared-attributes độc lập với MQTT/ThingsBoard thật. Có thêm
+  4 test cho `tb_on_connect` (mock `client.publish`/`subscribe`) — regression test cho
+  đúng bug "flapping disconnect" mô tả ở mục 3, để không tái diễn nếu ai sửa lại sau này.
 - **`iot_gateway/test_gateway_config.py`** (5 test) — test `handle_config_update()` mới
   thêm, gồm 1 test "đóng vòng lặp" chứng minh update runtime ảnh hưởng `evaluate()` ngay.
 - **`gateway_api/test_api.py`** (17 test) — dùng `fastapi.testclient.TestClient`, mock
@@ -66,7 +70,7 @@ Trước phiên này, **chỉ SV2 có unit test** (`iot_gateway/test_rule_engine
   topic/payload publish khi gửi command, fallback khi InfluxDB lỗi/không có data,
   endpoint `/config` (GET trả default, POST validate + publish retained).
 
-**Tổng: 50 test, tất cả pass** (33 trong `iot_gateway`, 17 trong `gateway_api`).
+**Tổng: 54 test, tất cả pass** (37 trong `iot_gateway`, 17 trong `gateway_api`).
 
 Chạy:
 ```bash
