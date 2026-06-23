@@ -1,0 +1,52 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "liveNow": true,
+  "panels": [
+    {
+      "title": "Fill Level by Bin",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [{"datasource": {"type": "influxdb"}, "query": "from(bucket: \"iot\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"bin_telemetry\")\n  |> filter(fn: (r) => r._field == \"fill_level\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100, "custom": {"lineWidth": 2, "fillOpacity": 15}}, "overrides": []}
+    },
+    {
+      "title": "Temperature by Bin",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [{"datasource": {"type": "influxdb"}, "query": "from(bucket: \"iot\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"bin_telemetry\")\n  |> filter(fn: (r) => r._field == \"temperature\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "celsius", "custom": {"lineWidth": 2}}, "overrides": []}
+    },
+    {
+      "title": "Methane (ppm) by Bin",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [{"datasource": {"type": "influxdb"}, "query": "from(bucket: \"iot\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"bin_telemetry\")\n  |> filter(fn: (r) => r._field == \"methane_ppm\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "ppm", "custom": {"lineWidth": 2}}, "overrides": []}
+    },
+    {
+      "title": "Actuator Status",
+      "type": "stat",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [{"datasource": {"type": "influxdb"}, "query": "from(bucket: \"iot\")\n  |> range(start: -5m)\n  |> filter(fn: (r) => r._measurement == \"actuator_status\")\n  |> last()\n  |> pivot(rowKey:[\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")", "refId": "A"}]
+    },
+    {
+      "title": "Events by Severity",
+      "type": "barchart",
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 16},
+      "targets": [{"datasource": {"type": "influxdb"}, "query": "from(bucket: \"iot\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r._measurement == \"gateway_events\")\n  |> group(columns: [\"severity\"])\n  |> count()", "refId": "A"}]
+    },
+    {
+      "title": "Recent Events",
+      "type": "table",
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 16},
+      "targets": [{"datasource": {"type": "influxdb"}, "query": "from(bucket: \"iot\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r._measurement == \"gateway_events\")\n  |> pivot(rowKey:[\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 20)", "refId": "A"}]
+    }
+  ],
+  "schemaVersion": 38,
+  "tags": ["iot", "waste-management"],
+  "time": {"from": "now-15m", "to": "now"},
+  "title": "Smart Waste Management",
+  "uid": "waste-mgmt",
+  "version": 1
+}

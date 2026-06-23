@@ -2,13 +2,17 @@ services:
 
   # ── MQTT Broker ─────────────────────────────────────────────────────────
   mosquitto:
-    image: eclipse-mosquitto:2.0
+    build: ./mosquitto
     container_name: mosquitto
     volumes:
-      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
       - mosquitto_data:/mosquitto/data
     networks:
       - iot_net
+    healthcheck:
+      test: ["CMD", "mosquitto_pub", "-h", "localhost", "-p", "1883", "-u", "iot_user", "-P", "iot_pass_2026", "-t", "health/check", "-m", "ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
   # ── Time-series Database (SV2) ──────────────────────────────────────────
@@ -28,6 +32,11 @@ services:
       - influxdb_data:/var/lib/influxdb2
     networks:
       - iot_net
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
   # ── Edge IoT Gateway (SV2) ──────────────────────────────────────────────
@@ -38,6 +47,8 @@ services:
       GATEWAY_ID: waste-gateway
       MQTT_BROKER: mosquitto
       MQTT_PORT: 1883
+      MQTT_USER: ${MQTT_USER:-iot_user}
+      MQTT_PASS: ${MQTT_PASS:-iot_pass_2026}
       INFLUXDB_URL: http://influxdb:8086
       INFLUXDB_TOKEN: ${INFLUXDB_TOKEN:-dev-token-change-me}
       INFLUXDB_ORG: ${INFLUXDB_ORG:-hust}
@@ -67,6 +78,8 @@ services:
       DEVICE_ID: sensor-bin-01
       MQTT_BROKER: mosquitto
       MQTT_PORT: 1883
+      MQTT_USER: ${MQTT_USER:-iot_user}
+      MQTT_PASS: ${MQTT_PASS:-iot_pass_2026}
       PUBLISH_INTERVAL: 5
     depends_on:
       - mosquitto
@@ -83,6 +96,8 @@ services:
       DEVICE_ID: sensor-bin-02
       MQTT_BROKER: mosquitto
       MQTT_PORT: 1883
+      MQTT_USER: ${MQTT_USER:-iot_user}
+      MQTT_PASS: ${MQTT_PASS:-iot_pass_2026}
       PUBLISH_INTERVAL: 5
     depends_on:
       - mosquitto
@@ -99,6 +114,8 @@ services:
       DEVICE_ID: sensor-bin-03
       MQTT_BROKER: mosquitto
       MQTT_PORT: 1883
+      MQTT_USER: ${MQTT_USER:-iot_user}
+      MQTT_PASS: ${MQTT_PASS:-iot_pass_2026}
       PUBLISH_INTERVAL: 7
     depends_on:
       - mosquitto
@@ -116,6 +133,8 @@ services:
       DEVICE_ID: actuator-bin-01
       MQTT_BROKER: mosquitto
       MQTT_PORT: 1883
+      MQTT_USER: ${MQTT_USER:-iot_user}
+      MQTT_PASS: ${MQTT_PASS:-iot_pass_2026}
     depends_on:
       - mosquitto
     networks:
@@ -131,6 +150,8 @@ services:
       DEVICE_ID: actuator-bin-02
       MQTT_BROKER: mosquitto
       MQTT_PORT: 1883
+      MQTT_USER: ${MQTT_USER:-iot_user}
+      MQTT_PASS: ${MQTT_PASS:-iot_pass_2026}
     depends_on:
       - mosquitto
     networks:
@@ -146,15 +167,82 @@ services:
       DEVICE_ID: actuator-bin-03
       MQTT_BROKER: mosquitto
       MQTT_PORT: 1883
+      MQTT_USER: ${MQTT_USER:-iot_user}
+      MQTT_PASS: ${MQTT_PASS:-iot_pass_2026}
     depends_on:
       - mosquitto
     networks:
       - iot_net
     restart: unless-stopped
 
+  # ── Grafana Dashboard (SV3) ─────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.3
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - influxdb
+    networks:
+      - iot_net
+    restart: unless-stopped
+
+  # ── REST API (SV3) ──────────────────────────────────────────────────────
+  gateway-api:
+    build: ./gateway_api
+    container_name: gateway-api
+    ports:
+      - "8001:8000"
+    environment:
+      MQTT_BROKER: mosquitto
+      MQTT_PORT: 1883
+      MQTT_USER: ${MQTT_USER:-iot_user}
+      MQTT_PASS: ${MQTT_PASS:-iot_pass_2026}
+      INFLUXDB_URL: http://influxdb:8086
+      INFLUXDB_TOKEN: ${INFLUXDB_TOKEN:-dev-token-change-me}
+      INFLUXDB_ORG: ${INFLUXDB_ORG:-hust}
+      INFLUXDB_BUCKET: ${INFLUXDB_BUCKET:-iot}
+      BIN_IDS: bin-01,bin-02,bin-03
+    depends_on:
+      - mosquitto
+      - influxdb
+    networks:
+      - iot_net
+    restart: unless-stopped
+
+  # ── ThingsBoard Gateway Bridge (SV3) ────────────────────────────────────
+  tb-gateway:
+    build: ./iot_gateway
+    container_name: tb-gateway
+    command: ["python", "-u", "tb_gateway.py"]
+    environment:
+      MQTT_BROKER: mosquitto
+      MQTT_PORT: 1883
+      MQTT_USER: ${MQTT_USER:-iot_user}
+      MQTT_PASS: ${MQTT_PASS:-iot_pass_2026}
+      TB_HOST: ${TB_HOST:-thingsboard.cloud}
+      TB_PORT: ${TB_PORT:-1883}
+      TB_GATEWAY_TOKEN: ${TB_GATEWAY_TOKEN:-}
+      BIN_IDS: bin-01,bin-02,bin-03
+    depends_on:
+      - mosquitto
+    networks:
+      - iot_net
+    profiles:
+      - thingsboard
+    restart: unless-stopped
+
 volumes:
   mosquitto_data:
   influxdb_data:
+  grafana_data:
 
 networks:
   iot_net:

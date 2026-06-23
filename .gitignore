@@ -28,3 +28,4 @@ docs/*.pdf
 mosquitto/data/
 influxdb_data/
 grafana_data/
+.venv-test/
