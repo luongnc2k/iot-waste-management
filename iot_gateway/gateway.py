@@ -46,6 +46,8 @@ from influx_writer import InfluxWriter
 GATEWAY_ID  = os.environ.get("GATEWAY_ID", "waste-gateway")
 MQTT_BROKER = os.environ.get("MQTT_BROKER", "mosquitto")
 MQTT_PORT   = int(os.environ.get("MQTT_PORT", "1883"))
+MQTT_USER   = os.environ.get("MQTT_USER", "")
+MQTT_PASS   = os.environ.get("MQTT_PASS", "")
 
 INFLUXDB_URL    = os.environ.get("INFLUXDB_URL", "http://influxdb:8086")
 INFLUXDB_TOKEN  = os.environ.get("INFLUXDB_TOKEN", "")
@@ -314,6 +316,8 @@ def main():
     client.on_disconnect = on_disconnect
 
     print(f"[{GATEWAY_ID}] Khởi động — kết nối {MQTT_BROKER}:{MQTT_PORT}")
+    if MQTT_USER:
+        client.username_pw_set(MQTT_USER, MQTT_PASS)
     while True:
         try:
             client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
