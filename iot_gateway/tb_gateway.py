@@ -33,6 +33,97 @@ def _now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# ── Hàm thuần (pure functions) ────────────────────────────────────────────────
+# Tách riêng logic chuyển đổi dữ liệu khỏi I/O (MQTT publish) để unit test được
+# độc lập, không cần broker/ThingsBoard thật — cùng triết lý với rule_engine.py
+# của SV2 (xem test_tb_gateway.py).
+
+RPC_METHOD_MAP = {
+    "setLock": "lock",
+    "setCompactor": "compactor",
+    "setBuzzer": "buzzer",
+    "setDispatch": "dispatch",
+}
+
+SHARED_ATTR_MAP = {
+    "fill_dispatch": "FILL_DISPATCH_THRESHOLD",
+    "fill_critical": "FILL_CRITICAL_THRESHOLD",
+    "temp_fire": "TEMP_FIRE_THRESHOLD",
+    "methane_alert": "METHANE_ALERT_THRESHOLD",
+    "weight_lock": "WEIGHT_LOCK_THRESHOLD",
+}
+
+
+def rpc_action_from_params(params) -> str:
+    """Map RPC params (bool/str/dict/None) → action 'on'/'off'."""
+    if isinstance(params, bool):
+        return "on" if params else "off"
+    if isinstance(params, str):
+        return params
+    return "on" if params else "off"
+
+
+def rpc_to_command(bin_id: str, method: str, params) -> dict | None:
+    """
+    Chuyển RPC ThingsBoard (method/params) thành command MQTT cục bộ.
+    Trả về None nếu method không nằm trong RPC_METHOD_MAP (unknown method).
+    """
+    target = RPC_METHOD_MAP.get(method)
+    if not target:
+        return None
+    return {
+        "bin_id": bin_id,
+        "target": target,
+        "action": rpc_action_from_params(params),
+        "reason": "thingsboard_rpc",
+        "timestamp": _now_iso(),
+    }
+
+
+def build_telemetry_values(data: dict) -> dict:
+    """Trích field telemetry cần đẩy lên ThingsBoard từ bản ghi normalized."""
+    return {
+        "fill_level": data.get("fill_level", 0),
+        "weight_kg": data.get("weight_kg", 0),
+        "methane_ppm": data.get("methane_ppm", 0),
+        "temperature": data.get("temperature", 0),
+        "fill_status": data.get("fill_status", "low"),
+    }
+
+
+def build_alarm_values(event_data: dict) -> dict:
+    """Trích field event → alarm telemetry để ThingsBoard tạo Alarm rule."""
+    return {
+        "alarm_type": event_data.get("event_type", "unknown"),
+        "alarm_severity": event_data.get("severity", "info"),
+        "alarm_value": event_data.get("value", 0),
+        "alarm_threshold": event_data.get("threshold", 0),
+        "alarm_action": event_data.get("action_taken", ""),
+    }
+
+
+def build_gateway_telemetry(bin_id: str, values: dict, ts_ms: int) -> dict:
+    """Bọc values theo format ThingsBoard Gateway API: {device: [{ts, values}]}."""
+    return {bin_id: [{"ts": ts_ms, "values": values}]}
+
+
+def map_shared_attributes(payload: dict) -> dict:
+    """
+    Trích threshold từ shared attributes ThingsBoard → dict {ENV_KEY: value}.
+    payload có thể là {"shared": {...}} (push notification) hoặc {...} thẳng
+    (response của attributes/request). Bỏ qua key không nằm trong SHARED_ATTR_MAP.
+    """
+    shared = payload.get("shared", payload)
+    thresholds = {}
+    for attr_key, env_key in SHARED_ATTR_MAP.items():
+        if attr_key in shared:
+            try:
+                thresholds[env_key] = float(shared[attr_key])
+            except (TypeError, ValueError):
+                continue
+    return thresholds
+
+
 # ── ThingsBoard MQTT Client ──────────────────────────────────────────────────
 
 def tb_on_connect(client, userdata, flags, rc):
@@ -62,37 +153,17 @@ def tb_on_message(client, userdata, msg):
         method = data.get("method", "")
         params = data.get("params", {})
 
-        method_map = {
-            "setLock": "lock",
-            "setCompactor": "compactor",
-            "setBuzzer": "buzzer",
-            "setDispatch": "dispatch",
-        }
-
-        target = method_map.get(method)
-        if not target:
+        command = rpc_to_command(device, method, params)
+        if command is None:
             print(f"[tb-gateway] Unknown RPC method: {method}")
             reply = {"device": device, "id": rpc_id, "data": {"success": False, "error": "unknown_method"}}
             client.publish("v1/gateway/rpc", json.dumps(reply))
             return
 
-        action = "on" if params else "off"
-        if isinstance(params, bool):
-            action = "on" if params else "off"
-        elif isinstance(params, str):
-            action = params
-
-        bin_id = device
-        command = {
-            "bin_id": bin_id,
-            "target": target,
-            "action": action,
-            "reason": "thingsboard_rpc",
-            "timestamp": _now_iso(),
-        }
+        bin_id = command["bin_id"]
         local_client = userdata["local_client"]
         local_client.publish(f"waste/{bin_id}/actuator/command", json.dumps(command), qos=1)
-        print(f"[tb-gateway] RPC {method}({params}) → {bin_id}/{target}={action}")
+        print(f"[tb-gateway] RPC {method}({params}) → {bin_id}/{command['target']}={command['action']}")
 
         reply = {"device": device, "id": rpc_id, "data": {"success": True}}
         client.publish("v1/gateway/rpc", json.dumps(reply))
@@ -138,15 +209,7 @@ def local_on_message(client, userdata, msg):
         _last_telemetry_push[bin_id] = now
 
         ts = int(datetime.now(timezone.utc).timestamp() * 1000)
-        telemetry = {
-            bin_id: [{"ts": ts, "values": {
-                "fill_level": data.get("fill_level", 0),
-                "weight_kg": data.get("weight_kg", 0),
-                "methane_ppm": data.get("methane_ppm", 0),
-                "temperature": data.get("temperature", 0),
-                "fill_status": data.get("fill_status", "low"),
-            }}]
-        }
+        telemetry = build_gateway_telemetry(bin_id, build_telemetry_values(data), ts)
         tb_client.publish("v1/gateway/telemetry", json.dumps(telemetry))
 
     except Exception as e:
@@ -156,15 +219,7 @@ def local_on_message(client, userdata, msg):
 def _forward_event_as_alarm(tb_client, bin_id, event_data):
     """Push gateway events as telemetry attributes to trigger TB alarms."""
     ts = int(datetime.now(timezone.utc).timestamp() * 1000)
-    alarm_telemetry = {
-        bin_id: [{"ts": ts, "values": {
-            "alarm_type": event_data.get("event_type", "unknown"),
-            "alarm_severity": event_data.get("severity", "info"),
-            "alarm_value": event_data.get("value", 0),
-            "alarm_threshold": event_data.get("threshold", 0),
-            "alarm_action": event_data.get("action_taken", ""),
-        }}]
-    }
+    alarm_telemetry = build_gateway_telemetry(bin_id, build_alarm_values(event_data), ts)
     tb_client.publish("v1/gateway/telemetry", json.dumps(alarm_telemetry))
     print(f"[tb-gateway] ALARM {bin_id}: {event_data.get('event_type')} ({event_data.get('severity')})")
 
@@ -172,21 +227,11 @@ def _forward_event_as_alarm(tb_client, bin_id, event_data):
 def _handle_shared_attributes(userdata, payload):
     """
     Receive shared attributes from ThingsBoard (threshold config).
-    Forward as config update to local gateway via MQTT retained message.
+    Forward as config update to local gateway via MQTT retained message
+    (waste/gateway/config) — gateway.py subscribe và áp dụng runtime (§5.17.3).
     """
     local_client = userdata["local_client"]
-    thresholds = {}
-    attr_map = {
-        "fill_dispatch": "FILL_DISPATCH_THRESHOLD",
-        "fill_critical": "FILL_CRITICAL_THRESHOLD",
-        "temp_fire": "TEMP_FIRE_THRESHOLD",
-        "methane_alert": "METHANE_ALERT_THRESHOLD",
-        "weight_lock": "WEIGHT_LOCK_THRESHOLD",
-    }
-    shared = payload.get("shared", payload)
-    for attr_key, env_key in attr_map.items():
-        if attr_key in shared:
-            thresholds[env_key] = float(shared[attr_key])
+    thresholds = map_shared_attributes(payload)
 
     if thresholds:
         config_msg = {"thresholds": thresholds, "source": "thingsboard_shared_attributes",
@@ -214,9 +259,6 @@ def main():
     local_client.on_message = local_on_message
     local_client.on_disconnect = lambda c, u, rc: print(f"[tb-gateway] Local MQTT disconnected (rc={rc}), auto-reconnecting...")
     local_client.reconnect_delay_set(min_delay=1, max_delay=10)
-    local_client = mqtt.Client(client_id="tb-gateway-local")
-    local_client.on_connect = local_on_connect
-    local_client.on_message = local_on_message
 
     # Cross-reference
     tb_client.user_data_set({"local_client": local_client})

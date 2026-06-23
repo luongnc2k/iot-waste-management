@@ -68,7 +68,7 @@ docker compose ps
 
 | Service | URL | Tài khoản |
 |---|---|---|
-| REST API (Swagger) | http://localhost:8000/docs | — |
+| REST API (Swagger) | http://localhost:8001/docs | — |
 | Grafana | http://localhost:3000 | admin / admin |
 | InfluxDB | http://localhost:8086 | admin / admin12345 |
 
@@ -99,19 +99,19 @@ docker exec mosquitto mosquitto_pub \
 
 ```bash
 # Health check
-curl http://localhost:8000/health
+curl http://localhost:8001/health
 
 # Xem trạng thái tất cả bins
-curl http://localhost:8000/bins
+curl http://localhost:8001/bins
 
 # Xem state chi tiết
-curl http://localhost:8000/bins/bin-01/state
+curl http://localhost:8001/bins/bin-01/state
 
 # Xem events gần đây
-curl http://localhost:8000/bins/bin-01/events
+curl http://localhost:8001/bins/bin-01/events
 
 # Gửi lệnh
-curl -X POST http://localhost:8000/bins/bin-01/command \
+curl -X POST http://localhost:8001/bins/bin-01/command \
   -H "Content-Type: application/json" \
   -d '{"target":"dispatch","action":"on","reason":"manual"}'
 ```
@@ -132,6 +132,25 @@ docker compose --profile thingsboard up -d --build tb-gateway
 docker compose down        # Dừng containers
 docker compose down -v     # Dừng + xóa volumes (mất dữ liệu)
 ```
+
+## Kiểm thử
+
+Unit test chạy bằng `unittest` (stdlib), không cần Docker/broker/InfluxDB thật:
+
+```bash
+# Rule engine + state store (SV2)
+python -m unittest discover -s iot_gateway -p "test_*.py" -v
+
+# REST API (SV3) — cần fastapi, pydantic, influxdb-client, paho-mqtt đã cài
+python -m unittest discover -s gateway_api -p "test_*.py" -v
+```
+
+| File | Phạm vi |
+|---|---|
+| `iot_gateway/test_rule_engine.py` | Rule engine (5 luật) + state store (debounce, edge-detect, collection) |
+| `iot_gateway/test_tb_gateway.py` | RPC ThingsBoard → command, telemetry/alarm payload, shared attributes → threshold |
+| `iot_gateway/test_gateway_config.py` | `waste/gateway/config` → cập nhật `THRESHOLDS` runtime |
+| `gateway_api/test_api.py` | REST API: validate input, 404, publish command, đọc InfluxDB (mock) |
 
 ## Cấu trúc thư mục
 
