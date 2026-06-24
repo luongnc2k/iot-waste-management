@@ -1,52 +1,498 @@
 {
-  "annotations": {"list": []},
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "liveNow": true,
-  "panels": [
-    {
-      "title": "Fill Level by Bin",
-      "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
-      "targets": [{"datasource": {"type": "influxdb"}, "query": "from(bucket: \"iot\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"bin_telemetry\")\n  |> filter(fn: (r) => r._field == \"fill_level\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)", "refId": "A"}],
-      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100, "custom": {"lineWidth": 2, "fillOpacity": 15}}, "overrides": []}
-    },
-    {
-      "title": "Temperature by Bin",
-      "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
-      "targets": [{"datasource": {"type": "influxdb"}, "query": "from(bucket: \"iot\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"bin_telemetry\")\n  |> filter(fn: (r) => r._field == \"temperature\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)", "refId": "A"}],
-      "fieldConfig": {"defaults": {"unit": "celsius", "custom": {"lineWidth": 2}}, "overrides": []}
-    },
-    {
-      "title": "Methane (ppm) by Bin",
-      "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
-      "targets": [{"datasource": {"type": "influxdb"}, "query": "from(bucket: \"iot\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"bin_telemetry\")\n  |> filter(fn: (r) => r._field == \"methane_ppm\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)", "refId": "A"}],
-      "fieldConfig": {"defaults": {"unit": "ppm", "custom": {"lineWidth": 2}}, "overrides": []}
-    },
-    {
-      "title": "Actuator Status",
-      "type": "stat",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
-      "targets": [{"datasource": {"type": "influxdb"}, "query": "from(bucket: \"iot\")\n  |> range(start: -5m)\n  |> filter(fn: (r) => r._measurement == \"actuator_status\")\n  |> last()\n  |> pivot(rowKey:[\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")", "refId": "A"}]
-    },
-    {
-      "title": "Events by Severity",
-      "type": "barchart",
-      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 16},
-      "targets": [{"datasource": {"type": "influxdb"}, "query": "from(bucket: \"iot\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r._measurement == \"gateway_events\")\n  |> group(columns: [\"severity\"])\n  |> count()", "refId": "A"}]
-    },
-    {
-      "title": "Recent Events",
-      "type": "table",
-      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 16},
-      "targets": [{"datasource": {"type": "influxdb"}, "query": "from(bucket: \"iot\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r._measurement == \"gateway_events\")\n  |> pivot(rowKey:[\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 20)", "refId": "A"}]
-    }
-  ],
   "schemaVersion": 38,
-  "tags": ["iot", "waste-management"],
-  "time": {"from": "now-15m", "to": "now"},
+  "tags": [
+    "iot",
+    "waste",
+    "hust"
+  ],
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "refresh": "5s",
+  "timezone": "browser",
   "title": "Smart Waste Management",
   "uid": "waste-mgmt",
-  "version": 1
+  "version": 6,
+  "panels": [
+    {
+      "title": "Mức đầy theo thùng (fill_level %)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb_iot"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb_iot"
+          },
+          "refId": "A",
+          "query": "from(bucket: \"iot\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"bin_telemetry\")\n  |> filter(fn: (r) => r._field == \"fill_level\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\", \"bin_id\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "displayName": "${__field.labels.bin_id}",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 85
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "description": "Mức đầy theo thùng (fill_level %) — đường ngưỡng dispatch = 85."
+    },
+    {
+      "title": "Khối lượng theo thùng (weight_kg)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb_iot"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb_iot"
+          },
+          "refId": "A",
+          "query": "from(bucket: \"iot\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"bin_telemetry\")\n  |> filter(fn: (r) => r._field == \"weight_kg\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\", \"bin_id\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "masskg",
+          "displayName": "${__field.labels.bin_id}",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 60
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "description": "Khối lượng theo thùng (weight_kg) — đường ngưỡng overweight = 60."
+    },
+    {
+      "title": "Nhiệt độ theo thùng (°C)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb_iot"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb_iot"
+          },
+          "refId": "A",
+          "query": "from(bucket: \"iot\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"bin_telemetry\")\n  |> filter(fn: (r) => r._field == \"temperature\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\", \"bin_id\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "displayName": "${__field.labels.bin_id}",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 60
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "description": "Nhiệt độ theo thùng (°C) — đường ngưỡng fire_risk = 60."
+    },
+    {
+      "title": "Methane theo thùng (ppm)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb_iot"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb_iot"
+          },
+          "refId": "A",
+          "query": "from(bucket: \"iot\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"bin_telemetry\")\n  |> filter(fn: (r) => r._field == \"methane_ppm\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\", \"bin_id\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ppm",
+          "displayName": "${__field.labels.bin_id}",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 500
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "description": "Methane theo thùng (ppm) — đường ngưỡng gas_alert = 500."
+    },
+    {
+      "title": "Trạng thái thiết bị theo thùng (lock/compactor/buzzer/dispatch)",
+      "type": "table",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb_iot"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb_iot"
+          },
+          "refId": "A",
+          "query": "from(bucket: \"iot\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"actuator_status\")\n  |> last()\n  |> keep(columns: [\"bin_id\", \"_field\", \"_value\"])\n  |> pivot(rowKey: [\"bin_id\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group()"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "off",
+                  "color": "green"
+                },
+                "1": {
+                  "text": "on",
+                  "color": "red"
+                }
+              }
+            }
+          ],
+          "custom": {
+            "align": "center"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      },
+      "description": "Trạng thái mới nhất của 4 cơ cấu chấp hành cho từng thùng."
+    },
+    {
+      "title": "Số event theo thời gian (bin_full / fire_risk / ...)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb_iot"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb_iot"
+          },
+          "refId": "A",
+          "query": "from(bucket: \"iot\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"gateway_events\")\n  |> filter(fn: (r) => r._field == \"value\")\n  |> group(columns: [\"event_type\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: count, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\", \"event_type\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.event_type}",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "description": "Đếm số event theo cửa sổ thời gian, tách theo loại event."
+    },
+    {
+      "title": "Thùng cần thu gom hiện tại (fill_level > 85)",
+      "type": "table",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb_iot"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 24
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb_iot"
+          },
+          "refId": "A",
+          "query": "from(bucket: \"iot\")\n  |> range(start: -10m)\n  |> filter(fn: (r) => r._measurement == \"bin_telemetry\" and r._field == \"fill_level\")\n  |> last()\n  |> filter(fn: (r) => r._value > 85.0)\n  |> keep(columns: [\"bin_id\", \"_value\"])\n  |> rename(columns: {_value: \"fill_level\"})\n  |> group()\n  |> sort(columns: [\"fill_level\"], desc: true)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      },
+      "description": "Suy từ InfluxDB: các thùng có mức đầy mới nhất vượt ngưỡng thu gom 85%."
+    },
+    {
+      "title": "Event gần nhất",
+      "type": "table",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb_iot"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 24
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb_iot"
+          },
+          "refId": "A",
+          "query": "from(bucket: \"iot\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r._measurement == \"gateway_events\")\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> keep(columns: [\"_time\", \"bin_id\", \"event_type\", \"severity\", \"value\", \"threshold\"])\n  |> group()\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 30)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "severity"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "critical": {
+                        "color": "red",
+                        "index": 0
+                      },
+                      "warning": {
+                        "color": "orange",
+                        "index": 1
+                      },
+                      "info": {
+                        "color": "blue",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Time",
+            "desc": true
+          }
+        ]
+      },
+      "description": "20–30 event gần nhất kèm severity, value, threshold."
+    }
+  ]
 }

@@ -9,7 +9,7 @@ services:
     networks:
       - iot_net
     healthcheck:
-      test: ["CMD", "mosquitto_pub", "-h", "localhost", "-p", "1883", "-u", "iot_user", "-P", "iot_pass_2026", "-t", "health/check", "-m", "ok"]
+      test: ["CMD", "mosquitto_pub", "-h", "localhost", "-p", "1883", "-u", "${MQTT_USER:-iot_user}", "-P", "${MQTT_PASS:-iot_pass_2026}", "-t", "health/check", "-m", "ok"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -44,23 +44,23 @@ services:
     build: ./iot_gateway
     container_name: waste-gateway
     environment:
-      GATEWAY_ID: waste-gateway
-      MQTT_BROKER: mosquitto
-      MQTT_PORT: 1883
+      GATEWAY_ID: ${GATEWAY_ID:-waste-gateway}
+      MQTT_BROKER: ${MQTT_BROKER:-mosquitto}
+      MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USER: ${MQTT_USER:-iot_user}
       MQTT_PASS: ${MQTT_PASS:-iot_pass_2026}
-      INFLUXDB_URL: http://influxdb:8086
+      INFLUXDB_URL: ${INFLUXDB_URL:-http://influxdb:8086}
       INFLUXDB_TOKEN: ${INFLUXDB_TOKEN:-dev-token-change-me}
       INFLUXDB_ORG: ${INFLUXDB_ORG:-hust}
       INFLUXDB_BUCKET: ${INFLUXDB_BUCKET:-iot}
-      # Ngưỡng rule engine — chỉnh được không cần sửa code
-      FILL_DISPATCH_THRESHOLD: 85
-      FILL_CRITICAL_THRESHOLD: 95
-      TEMP_FIRE_THRESHOLD: 60
-      METHANE_ALERT_THRESHOLD: 500
-      WEIGHT_LOCK_THRESHOLD: 60
-      SENSOR_OFFLINE_TIMEOUT: 30
-      COLLECTION_DELAY: 20
+      # Ngưỡng rule engine — đọc từ .env (có default nếu thiếu)
+      FILL_DISPATCH_THRESHOLD: ${FILL_DISPATCH_THRESHOLD:-85}
+      FILL_CRITICAL_THRESHOLD: ${FILL_CRITICAL_THRESHOLD:-95}
+      TEMP_FIRE_THRESHOLD: ${TEMP_FIRE_THRESHOLD:-60}
+      METHANE_ALERT_THRESHOLD: ${METHANE_ALERT_THRESHOLD:-500}
+      WEIGHT_LOCK_THRESHOLD: ${WEIGHT_LOCK_THRESHOLD:-60}
+      SENSOR_OFFLINE_TIMEOUT: ${SENSOR_OFFLINE_TIMEOUT:-30}
+      COLLECTION_DELAY: ${COLLECTION_DELAY:-20}
     depends_on:
       - mosquitto
       - influxdb
@@ -73,14 +73,14 @@ services:
     build: ./virtual_sensor
     container_name: sensor-bin-01
     environment:
-      AREA_ID: district-1
+      AREA_ID: ${AREA_ID:-district-1}
       BIN_ID: bin-01
       DEVICE_ID: sensor-bin-01
-      MQTT_BROKER: mosquitto
-      MQTT_PORT: 1883
+      MQTT_BROKER: ${MQTT_BROKER:-mosquitto}
+      MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USER: ${MQTT_USER:-iot_user}
       MQTT_PASS: ${MQTT_PASS:-iot_pass_2026}
-      PUBLISH_INTERVAL: 5
+      PUBLISH_INTERVAL: ${PUBLISH_INTERVAL:-5}
     depends_on:
       - mosquitto
     networks:
@@ -91,14 +91,14 @@ services:
     build: ./virtual_sensor
     container_name: sensor-bin-02
     environment:
-      AREA_ID: district-1
+      AREA_ID: ${AREA_ID:-district-1}
       BIN_ID: bin-02
       DEVICE_ID: sensor-bin-02
-      MQTT_BROKER: mosquitto
-      MQTT_PORT: 1883
+      MQTT_BROKER: ${MQTT_BROKER:-mosquitto}
+      MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USER: ${MQTT_USER:-iot_user}
       MQTT_PASS: ${MQTT_PASS:-iot_pass_2026}
-      PUBLISH_INTERVAL: 5
+      PUBLISH_INTERVAL: ${PUBLISH_INTERVAL:-5}
     depends_on:
       - mosquitto
     networks:
@@ -109,14 +109,15 @@ services:
     build: ./virtual_sensor
     container_name: sensor-bin-03
     environment:
-      AREA_ID: district-1
+      AREA_ID: ${AREA_ID:-district-1}
       BIN_ID: bin-03
       DEVICE_ID: sensor-bin-03
-      MQTT_BROKER: mosquitto
-      MQTT_PORT: 1883
+      MQTT_BROKER: ${MQTT_BROKER:-mosquitto}
+      MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USER: ${MQTT_USER:-iot_user}
       MQTT_PASS: ${MQTT_PASS:-iot_pass_2026}
-      PUBLISH_INTERVAL: 7
+      # Khác bin-01/02 để 3 thùng lệch pha (cấu hình riêng trong .env)
+      PUBLISH_INTERVAL: ${PUBLISH_INTERVAL_BIN03:-7}
     depends_on:
       - mosquitto
     networks:
@@ -128,11 +129,11 @@ services:
     build: ./virtual_actuator
     container_name: actuator-bin-01
     environment:
-      AREA_ID: district-1
+      AREA_ID: ${AREA_ID:-district-1}
       BIN_ID: bin-01
       DEVICE_ID: actuator-bin-01
-      MQTT_BROKER: mosquitto
-      MQTT_PORT: 1883
+      MQTT_BROKER: ${MQTT_BROKER:-mosquitto}
+      MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USER: ${MQTT_USER:-iot_user}
       MQTT_PASS: ${MQTT_PASS:-iot_pass_2026}
     depends_on:
@@ -145,11 +146,11 @@ services:
     build: ./virtual_actuator
     container_name: actuator-bin-02
     environment:
-      AREA_ID: district-1
+      AREA_ID: ${AREA_ID:-district-1}
       BIN_ID: bin-02
       DEVICE_ID: actuator-bin-02
-      MQTT_BROKER: mosquitto
-      MQTT_PORT: 1883
+      MQTT_BROKER: ${MQTT_BROKER:-mosquitto}
+      MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USER: ${MQTT_USER:-iot_user}
       MQTT_PASS: ${MQTT_PASS:-iot_pass_2026}
     depends_on:
@@ -162,11 +163,11 @@ services:
     build: ./virtual_actuator
     container_name: actuator-bin-03
     environment:
-      AREA_ID: district-1
+      AREA_ID: ${AREA_ID:-district-1}
       BIN_ID: bin-03
       DEVICE_ID: actuator-bin-03
-      MQTT_BROKER: mosquitto
-      MQTT_PORT: 1883
+      MQTT_BROKER: ${MQTT_BROKER:-mosquitto}
+      MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USER: ${MQTT_USER:-iot_user}
       MQTT_PASS: ${MQTT_PASS:-iot_pass_2026}
     depends_on:
@@ -182,8 +183,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning
@@ -201,15 +202,15 @@ services:
     ports:
       - "8001:8000"
     environment:
-      MQTT_BROKER: mosquitto
-      MQTT_PORT: 1883
+      MQTT_BROKER: ${MQTT_BROKER:-mosquitto}
+      MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USER: ${MQTT_USER:-iot_user}
       MQTT_PASS: ${MQTT_PASS:-iot_pass_2026}
-      INFLUXDB_URL: http://influxdb:8086
+      INFLUXDB_URL: ${INFLUXDB_URL:-http://influxdb:8086}
       INFLUXDB_TOKEN: ${INFLUXDB_TOKEN:-dev-token-change-me}
       INFLUXDB_ORG: ${INFLUXDB_ORG:-hust}
       INFLUXDB_BUCKET: ${INFLUXDB_BUCKET:-iot}
-      BIN_IDS: bin-01,bin-02,bin-03
+      BIN_IDS: ${BIN_IDS:-bin-01,bin-02,bin-03}
     depends_on:
       - mosquitto
       - influxdb
@@ -223,14 +224,14 @@ services:
     container_name: tb-gateway
     command: ["python", "-u", "tb_gateway.py"]
     environment:
-      MQTT_BROKER: mosquitto
-      MQTT_PORT: 1883
+      MQTT_BROKER: ${MQTT_BROKER:-mosquitto}
+      MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USER: ${MQTT_USER:-iot_user}
       MQTT_PASS: ${MQTT_PASS:-iot_pass_2026}
       TB_HOST: ${TB_HOST:-thingsboard.cloud}
       TB_PORT: ${TB_PORT:-1883}
       TB_GATEWAY_TOKEN: ${TB_GATEWAY_TOKEN:-}
-      BIN_IDS: bin-01,bin-02,bin-03
+      BIN_IDS: ${BIN_IDS:-bin-01,bin-02,bin-03}
     depends_on:
       - mosquitto
     networks:
