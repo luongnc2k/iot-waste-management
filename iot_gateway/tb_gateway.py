@@ -103,6 +103,19 @@ def build_alarm_values(event_data: dict) -> dict:
     }
 
 
+def build_actuator_values(status: dict) -> dict | None:
+    """
+    Trích trạng thái 4 cơ cấu chấp hành từ payload actuator/status để đẩy lên TB.
+
+    Trả về None nếu payload không đủ 4 trường (ví dụ payload error chỉ có "error"/"reason")
+    — cùng nguyên tắc với InfluxWriter.write_actuator_status, tránh đẩy dữ liệu rác.
+    """
+    keys = ("lock", "compactor", "buzzer", "dispatch")
+    if not all(k in status for k in keys):
+        return None
+    return {k: status[k] for k in keys}
+
+
 def build_gateway_telemetry(bin_id: str, values: dict, ts_ms: int) -> dict:
     """Bọc values theo format ThingsBoard Gateway API: {device: [{ts, values}]}."""
     return {bin_id: [{"ts": ts_ms, "values": values}]}
@@ -127,7 +140,7 @@ def map_shared_attributes(payload: dict) -> dict:
 
 # ── ThingsBoard MQTT Client ──────────────────────────────────────────────────
 
-def tb_on_connect(client, userdata, flags, rc):
+def tb_on_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:
         print("[tb-gateway] Connected to ThingsBoard Cloud")
         client.subscribe("v1/gateway/rpc", qos=1)
@@ -186,11 +199,12 @@ def tb_on_message(client, userdata, msg):
 
 # ── Local MQTT Client ─────────────────────────────────────────────────────────
 
-def local_on_connect(client, userdata, flags, rc):
+def local_on_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:
         print("[tb-gateway] Connected to local MQTT broker")
         client.subscribe("waste/+/gateway/normalized", qos=1)
         client.subscribe("waste/+/gateway/event", qos=1)
+        client.subscribe("waste/+/actuator/status", qos=1)
     else:
         print(f"[tb-gateway] Local MQTT failed, rc={rc}")
 
@@ -213,6 +227,16 @@ def local_on_message(client, userdata, msg):
 
         if msg.topic.endswith("/gateway/event"):
             _forward_event_as_alarm(tb_client, bin_id, data)
+            return
+
+        # Trạng thái actuator: đẩy ngay (sự kiện thưa, không throttle), bỏ qua payload error.
+        if msg.topic.endswith("/actuator/status"):
+            values = build_actuator_values(data)
+            if values:
+                ts = int(datetime.now(timezone.utc).timestamp() * 1000)
+                tb_client.publish("v1/gateway/telemetry",
+                                  json.dumps(build_gateway_telemetry(bin_id, values, ts)))
+                print(f"[tb-gateway] STATUS {bin_id}: {values}")
             return
 
         now = time.time()
@@ -258,18 +282,26 @@ def main():
         return
 
     # ThingsBoard client
-    tb_client = mqtt.Client(client_id="tb-gateway-cloud")
+    # Dùng CallbackAPIVersion.VERSION2 (như gateway.py/sensor/actuator) — callback có
+    # thêm tham số properties; tránh DeprecationWarning của paho 2.x.
+    tb_client = mqtt.Client(
+        client_id="tb-gateway-cloud",
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+    )
     tb_client.username_pw_set(TB_GATEWAY_TOKEN)
     tb_client.on_connect = tb_on_connect
     tb_client.on_message = tb_on_message
-    tb_client.on_disconnect = lambda c, u, rc: print(f"[tb-gateway] TB disconnected (rc={rc}), auto-reconnecting...")
+    tb_client.on_disconnect = lambda c, u, flags, rc, props=None: print(f"[tb-gateway] TB disconnected (rc={rc}), auto-reconnecting...")
     tb_client.reconnect_delay_set(min_delay=1, max_delay=30)
 
     # Local client
-    local_client = mqtt.Client(client_id="tb-gateway-local")
+    local_client = mqtt.Client(
+        client_id="tb-gateway-local",
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+    )
     local_client.on_connect = local_on_connect
     local_client.on_message = local_on_message
-    local_client.on_disconnect = lambda c, u, rc: print(f"[tb-gateway] Local MQTT disconnected (rc={rc}), auto-reconnecting...")
+    local_client.on_disconnect = lambda c, u, flags, rc, props=None: print(f"[tb-gateway] Local MQTT disconnected (rc={rc}), auto-reconnecting...")
     local_client.reconnect_delay_set(min_delay=1, max_delay=10)
 
     # Cross-reference

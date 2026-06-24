@@ -14,6 +14,7 @@ from tb_gateway import (
     rpc_to_command,
     build_telemetry_values,
     build_alarm_values,
+    build_actuator_values,
     build_gateway_telemetry,
     map_shared_attributes,
     tb_on_connect,
@@ -102,6 +103,25 @@ class TestBuildAlarmValues(unittest.TestCase):
         values = build_alarm_values({})
         self.assertEqual(values["alarm_type"], "unknown")
         self.assertEqual(values["alarm_severity"], "info")
+
+
+class TestBuildActuatorValues(unittest.TestCase):
+    def test_extracts_four_actuator_fields(self):
+        status = {"device_id": "actuator-bin-01", "bin_id": "bin-01",
+                  "lock": "off", "compactor": "on", "buzzer": "off", "dispatch": "on",
+                  "last_command_reason": "bin_full", "timestamp": "2026-06-10T10:00:06Z"}
+        self.assertEqual(build_actuator_values(status), {
+            "lock": "off", "compactor": "on", "buzzer": "off", "dispatch": "on",
+        })
+
+    def test_error_payload_returns_none(self):
+        # payload error của actuator không có đủ 4 trường → bỏ qua, không đẩy lên TB
+        err = {"device_id": "actuator-bin-01", "bin_id": "bin-01",
+               "error": "safety_block:compactor_during_fire_risk", "reason": "manual"}
+        self.assertIsNone(build_actuator_values(err))
+
+    def test_partial_payload_returns_none(self):
+        self.assertIsNone(build_actuator_values({"lock": "on", "buzzer": "off"}))
 
 
 class TestBuildGatewayTelemetry(unittest.TestCase):

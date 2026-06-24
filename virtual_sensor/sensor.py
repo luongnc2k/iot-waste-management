@@ -100,6 +100,9 @@ class BinState:
         self.temperature = random.uniform(28.0, 35.0)   # °C; nhiệt độ môi trường
         self.lid_status  = "closed"                     # "open" | "closed"
         self.tilt        = False                        # True khi thùng bị đổ nghiêng
+        self.locked      = False                        # True khi actuator khóa nắp (lock=on)
+        # → khi khóa nắp, không ai bỏ thêm rác được nên fill/weight NGỪNG tăng.
+        #   Trạng thái này cập nhật từ actuator/status (xem on_message).
 
         # ── Tham số nội bộ (không publish ra ngoài) ────────────────────────
         # Tốc độ tăng mức đầy: mô phỏng lượng rác bỏ vào mỗi chu kỳ.
@@ -125,11 +128,16 @@ class BinState:
           tự vơi mà không có xe thu gom. Dữ liệu như vậy sẽ bị gateway
           reject hoặc sinh false alarm "xe vừa thu gom mà sao lại đầy?"
         """
-        noise = random.gauss(0, 0.1)                    # nhiễu nhỏ: ±0.1% trung bình
-        self.fill_level += self._fill_rate + noise
-        self.fill_level = max(0.0, min(100.0, self.fill_level))  # clamp về [0, 100]
+        # Khi nắp đang bị khóa (lock=on, chống quá tải): không ai bỏ thêm rác được
+        # → fill_level NGỪNG tăng (chỉ giữ nguyên). Nhờ vậy "khóa nắp" có tác dụng
+        #   thực tế chứ không chỉ là tín hiệu. fill tiếp tục tăng khi mở khóa/thu gom.
+        if not self.locked:
+            noise = random.gauss(0, 0.1)                # nhiễu nhỏ: ±0.1% trung bình
+            self.fill_level += self._fill_rate + noise
+            self.fill_level = max(0.0, min(100.0, self.fill_level))  # clamp về [0, 100]
 
-        # Cân nặng tỉ lệ thuận với mức đầy + nhiễu nhỏ (sai số cân)
+        # Cân nặng tỉ lệ thuận với mức đầy + nhiễu nhỏ (sai số cân). Khi khóa, fill đứng
+        # yên nên weight cũng đứng yên (chỉ dao động trong sai số cân ±0.3kg).
         self.weight_kg = self.fill_level * KG_PER_FILL_PERCENT + random.gauss(0, 0.3)
         self.weight_kg = max(0.0, self.weight_kg)       # cân nặng không âm
 
@@ -249,8 +257,13 @@ class BinState:
         self.methane_ppm = random.uniform(50, 100)      # về gần nền không khí
         self.temperature = random.uniform(28, 33)       # nhiệt độ bình thường
         self.tilt        = False                        # thùng được đặt lại thẳng
+        self.locked      = False                        # thu gom xong → mở khóa, cho đầy lại
         self._collected  = False
         print(f"[{DEVICE_ID}] Thùng đã được thu gom — reset về {self.fill_level:.1f}%")
+
+    def set_lock(self, lock_value: str):
+        """Cập nhật trạng thái khóa nắp từ actuator/status (lock='on'/'off')."""
+        self.locked = (lock_value == "on")
 
     def tick(self) -> dict:
         """
@@ -314,11 +327,14 @@ def on_connect(client, _userdata, _flags, rc, _properties=None):
     """
     if rc == 0:
         print(f"[{DEVICE_ID}] Kết nối MQTT broker thành công")
-        # Subscribe topic reset để nhận thông báo từ gateway
-        # khi xe thu gom đã lấy rác khỏi thùng này.
+        # Subscribe topic reset để nhận thông báo thu gom từ gateway.
         reset_topic = f"waste/{BIN_ID}/sensor/reset"
         client.subscribe(reset_topic)
-        print(f"[{DEVICE_ID}] Subscribe: {reset_topic}")
+        # Subscribe trạng thái actuator để biết nắp có đang khóa không (lock):
+        # khi lock=on thì ngừng nhận thêm rác (fill không tăng).
+        status_topic = f"waste/{BIN_ID}/actuator/status"
+        client.subscribe(status_topic)
+        print(f"[{DEVICE_ID}] Subscribe: {reset_topic} , {status_topic}")
     else:
         print(f"[{DEVICE_ID}] Kết nối thất bại, rc={rc}")
 
@@ -334,18 +350,23 @@ def on_message(_client, userdata, msg):
     khi tạo mqtt.Client, cho phép callback truy cập state
     mà không cần biến global (thread-safe hơn).
 
-    Format lệnh reset mong đợi:
-      {"action": "reset"}
-    Nếu action khác → bỏ qua (forward-compatible với các lệnh mới sau này).
+    Hai loại message:
+      - .../sensor/reset    : {"action":"reset"}  → đặt fill về ~0 (đã thu gom)
+      - .../actuator/status : {... "lock":"on"/"off" ...} → cập nhật cờ khóa nắp
     """
+    state = userdata["state"]
     try:
         payload = json.loads(msg.payload.decode())
-        if payload.get("action") == "reset":
-            userdata["state"].reset_after_collection()
+        if msg.topic.endswith("/sensor/reset"):
+            if payload.get("action") == "reset":
+                state.reset_after_collection()
+        elif msg.topic.endswith("/actuator/status"):
+            if "lock" in payload:        # bỏ qua payload error (không có trường lock)
+                state.set_lock(payload["lock"])
     except Exception as e:
         # Không raise exception trong callback — paho sẽ bỏ qua silently
-        # nhưng log để debug khi gateway gửi sai format.
-        print(f"[{DEVICE_ID}] Lỗi parse message reset: {e}")
+        # nhưng log để debug khi nhận sai format.
+        print(f"[{DEVICE_ID}] Lỗi parse message ({msg.topic}): {e}")
 
 
 def on_disconnect(_client, _userdata, _flags, reason_code, _properties=None):
