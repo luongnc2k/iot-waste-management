@@ -68,6 +68,29 @@ def health():
     return {"status": "ok", "service": "gateway-api", "bins": BINS}
 
 
+@app.get("/collection/route")
+def collection_route():
+    """
+    Danh sách thùng cần thu gom ngay bây giờ (đề bài §5.9 REST API).
+
+    gateway.py (SV2) đã có sẵn collection_route() trong state_store.py, nhưng
+    gateway-api chạy ở container riêng, không chia sẻ bộ nhớ với gateway nên
+    không gọi trực tiếp được. Endpoint này suy ra danh sách từ fill_level mới
+    nhất trên InfluxDB (đúng cách Grafana panel "Thùng cần thu gom hiện tại"
+    đã làm) — không cần thêm cơ chế chia sẻ trạng thái mới giữa hai container.
+    Sắp xếp giảm dần theo fill_level để gợi ý thứ tự thu gom (đầy nhất trước).
+    """
+    threshold = float(os.getenv("FILL_DISPATCH_THRESHOLD", "85"))
+    due = []
+    for bin_id in BINS:
+        telemetry = _get_latest_telemetry(bin_id)
+        fill_level = telemetry.get("fill_level")
+        if fill_level is not None and fill_level > threshold:
+            due.append({"bin_id": bin_id, "fill_level": fill_level})
+    due.sort(key=lambda b: b["fill_level"], reverse=True)
+    return {"threshold": threshold, "bins_due_for_collection": due}
+
+
 @app.get("/bins")
 def list_bins():
     results = []
