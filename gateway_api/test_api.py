@@ -101,6 +101,28 @@ class TestGetBinState(ApiTestCase):
         self.assertIn("telemetry", body)
         self.assertIn("actuator", body)
 
+    def test_actuator_query_uses_wide_time_window_not_5_minutes(self):
+        """
+        Regression test: actuator chỉ publish status khi NHẬN LỆNH MỚI (event-
+        driven), không định kỳ như sensor. Range "-5m" từng khiến API báo nhầm
+        "no_data" cho actuator đã idle quá 5 phút dù trạng thái vẫn hợp lệ —
+        phát hiện khi tập demo. Phải dùng cửa sổ rộng (ví dụ -24h), khớp cách
+        panel Grafana "Trạng thái thiết bị theo thùng" đã làm từ trước.
+        """
+        captured_queries = []
+
+        def fake_query(query, org=None):
+            captured_queries.append(query)
+            return []
+
+        api.query_api.query = mock.MagicMock(side_effect=fake_query)
+        self.client.get(f"/bins/{api.BINS[0]}/state")
+
+        actuator_queries = [q for q in captured_queries if "actuator_status" in q]
+        self.assertTrue(actuator_queries, "Không thấy truy vấn actuator_status nào")
+        self.assertNotIn("-5m", actuator_queries[0])
+        self.assertIn("-24h", actuator_queries[0])
+
 
 class TestCollectionRoute(ApiTestCase):
     """GET /collection/route — đề bài §5.9, suy từ fill_level mới nhất trên InfluxDB."""

@@ -1,6 +1,6 @@
 # Hướng dẫn dựng Dashboard trên ThingsBoard Cloud
 
-> Đề tài 5 — Virtual Smart Waste Management Gateway (IT6130).
+> Đề tài 2.5 — Virtual Smart Waste Management Gateway (IT6130).
 > Dashboard ThingsBoard dựng trên web UI `https://thingsboard.cloud`. Tài liệu này
 > hướng dẫn từng bước, dùng **đúng tên telemetry/RPC** mà `tb_gateway.py` gửi lên.
 

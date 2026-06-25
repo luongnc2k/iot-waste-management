@@ -1,5 +1,5 @@
 # Báo cáo Project cuối kỳ
-## Đề tài 5 — Virtual Smart Waste Management Gateway
+## Đề tài 2.5 — Virtual Smart Waste Management Gateway
 ### Hệ thống IoT Gateway ảo quản lý thùng rác thông minh và tối ưu thu gom
 
 **Môn học:** Lập trình và Ảo hóa cho IoT — IT6130
