@@ -102,6 +102,37 @@ class TestGetBinState(ApiTestCase):
         self.assertIn("actuator", body)
 
 
+class TestCollectionRoute(ApiTestCase):
+    """GET /collection/route — đề bài §5.9, suy từ fill_level mới nhất trên InfluxDB."""
+
+    def test_returns_empty_when_no_bin_above_threshold(self):
+        api.query_api.query = mock.MagicMock(return_value=[
+            FakeTable([FakeRecord({"fill_level": 10.0})])
+        ])
+        resp = self.client.get("/collection/route")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["bins_due_for_collection"], [])
+
+    def test_returns_bins_above_threshold_sorted_by_fill_desc(self):
+        fill_by_bin = {api.BINS[0]: 92.0, api.BINS[1]: 10.0, api.BINS[2]: 88.0}
+
+        def fake_query(query, org=None):
+            for bin_id, fill in fill_by_bin.items():
+                if bin_id in query:
+                    return [FakeTable([FakeRecord({"fill_level": fill})])]
+            return []
+
+        api.query_api.query = mock.MagicMock(side_effect=fake_query)
+        resp = self.client.get("/collection/route")
+        due = resp.json()["bins_due_for_collection"]
+        self.assertEqual([b["bin_id"] for b in due], [api.BINS[0], api.BINS[2]])
+        self.assertEqual(due[0]["fill_level"], 92.0)
+
+    def test_includes_threshold_used(self):
+        resp = self.client.get("/collection/route")
+        self.assertIn("threshold", resp.json())
+
+
 class TestGetBinEvents(ApiTestCase):
     def test_unknown_bin_returns_404(self):
         resp = self.client.get("/bins/bin-does-not-exist/events")
