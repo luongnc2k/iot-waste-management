@@ -29,3 +29,9 @@ mosquitto/data/
 influxdb_data/
 grafana_data/
 .venv-test/
+
+# LaTeX build artifacts (chỉ giữ .tex và .pdf cuối cùng)
+report/*.aux
+report/*.log
+report/*.out
+report/*.toc

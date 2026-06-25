@@ -1,6 +1,6 @@
 # Virtual Smart Waste Management Gateway
 
-**Đề tài 5** — IT6130 Lập trình và Ảo hóa cho IoT (HUST)
+**Đề tài 2.5** — IT6130 Lập trình và Ảo hóa cho IoT (HUST)
 
 Hệ thống IoT gateway ảo giám sát thùng rác thông minh: theo dõi mức đầy, nhiệt độ, khí methane, phát hiện bất thường bằng rule engine, điều khiển actuator tự động, đồng bộ hai chiều với ThingsBoard Cloud.
 

@@ -1,6 +1,6 @@
 # Nội dung báo cáo Mini Project — 15 slide chính + slide dự phòng
 
-> **Đề tài 5 — Virtual Smart Waste Management Gateway**
+> **Đề tài 2.5 — Virtual Smart Waste Management Gateway**
 > Học phần IT6130 — Lập trình và Ảo hóa cho IoT (HUST)
 >
 > Quy ước trình bày: phần **Tiêu đề** hiển thị trên slide; phần **Nội dung** là các ý
@@ -16,7 +16,7 @@
 *Hệ thống IoT Gateway ảo giám sát thùng rác thông minh*
 
 - Học phần: IT6130 — Lập trình và Ảo hóa cho IoT
-- Đề tài 5
+- Đề tài 2.5
 - Nhóm thực hiện: ba thành viên (SV1 – SV2 – SV3)
 - Giảng viên hướng dẫn / Lớp / Ngày báo cáo
 

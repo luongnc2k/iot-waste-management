@@ -228,9 +228,15 @@ def _get_latest_telemetry(bin_id: str) -> dict:
 
 
 def _get_latest_actuator(bin_id: str) -> dict:
+    # Range rộng hơn _get_latest_telemetry có chủ đích: sensor publish định kỳ
+    # mỗi 5-7s nên cửa sổ 5 phút luôn có dữ liệu mới, nhưng actuator chỉ publish
+    # status khi NHẬN LỆNH MỚI (event-driven). Nếu actuator đứng yên quá 5 phút
+    # (ví dụ không có sự kiện nào kích hoạt), API sẽ báo sai "no_data" dù trạng
+    # thái thật vẫn còn hiệu lực — bug phát hiện khi demo, actuator lock=on từ
+    # 23 phút trước vẫn là trạng thái đúng nhưng bị query timeout bỏ qua.
     query = f'''
     from(bucket: "{INFLUXDB_BUCKET}")
-      |> range(start: -5m)
+      |> range(start: -24h)
       |> filter(fn: (r) => r._measurement == "actuator_status")
       |> filter(fn: (r) => r.bin_id == "{bin_id}")
       |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
