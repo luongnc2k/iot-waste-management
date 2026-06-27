@@ -1,101 +1,131 @@
 # SV3 — Đánh giá công việc (ThingsBoard + REST API + Grafana + Docker Compose)
 
 Phạm vi SV3 theo README: `gateway_api/`, `iot_gateway/tb_gateway.py`, `grafana/`, `docker-compose.yml`, `README.md`.
-Tài liệu này đánh giá những gì đã làm, những gì vừa được vá/test thêm, và việc còn mở.
 
-## 1. Checklist nhiệm vụ bắt buộc
+## 1. Checklist nhiệm vụ bắt buộc (§5.6 – §5.14)
 
 | Mục | Trạng thái | Ghi chú |
 |---|---|---|
-| REST API (FastAPI): health, bins, state, events, command | ✅ Done | `gateway_api/api.py` |
-| ThingsBoard Gateway bridge (telemetry uplink + RPC downlink) | ✅ Done, verify thật trên cloud | token `g0gmqki3xip1aaryq93t`, 3 sub-device bin-01/02/03 lên ThingsBoard |
-| Grafana provisioning (datasource + dashboard) | ✅ Done | 6 panel: fill level, temperature, methane, actuator status, events by severity, recent events |
-| Docker Compose: gateway-api, grafana, tb-gateway (profile) | ✅ Done | đã chạy 11 container, verify end-to-end |
-| README (kiến trúc, cài đặt, phân công) | ✅ Done, đã sửa thêm lần này | xem mục 3 |
-| Branch `sv3-thingsboard-restapi` đã push lên GitHub | ✅ Đã xác nhận | `origin/sv3-thingsboard-restapi` == local, commit `36cc654`. **`origin/main` chưa có commit này** — chưa merge/PR. |
+| REST API (FastAPI): health, bins, state, events, command, config | ✅ Done | `gateway_api/api.py` |
+| GET /collection/route (§5.9) | ✅ Done | Suy từ InfluxDB fill_level, sắp xếp giảm dần |
+| ThingsBoard bridge: telemetry uplink + RPC downlink | ✅ Verify thật trên cloud | 3 sub-device bin-01/02/03, Alarm rules, dashboard |
+| Grafana dashboard: 11 panel (8 bắt buộc + 3 nâng cao) | ✅ Done | Provisioning tự động khi container start |
+| Docker Compose: 12 service, network, volume, env | ✅ Done | Healthcheck đủ 12 service |
+| README: kiến trúc, cài đặt, phân công, hướng dẫn test | ✅ Done | Có hướng dẫn ThingsBoard + demo |
 
-## 2. Nâng cao đã làm trước đó nhưng CHƯA hoàn thiện (phát hiện khi đọc sâu code)
+## 2. Yêu cầu nâng cao §5.17 — trạng thái đầy đủ
 
-Phiên làm việc trước đã thêm 2 endpoint nâng cao (`GET/POST /config`) và xử lý Shared
-Attributes từ ThingsBoard (`tb_gateway.py::_handle_shared_attributes`) — đúng theo gợi ý
-"Endpoint API đổi ngưỡng rule engine khi đang chạy" đã liệt ở lần trước. Nhưng khi đọc kỹ:
+| # | Yêu cầu | Trạng thái | Triển khai cụ thể |
+|---|---|---|---|
+| 1 | Tối ưu lộ trình thu gom (gợi ý thứ tự thùng) | ✅ Done | `GET /collection/route` — sắp xếp theo fill_level desc |
+| 2 | Bản đồ thùng rác theo màu trên ThingsBoard | ✅ Done | Toạ độ push qua Gateway API, cần thêm widget Markers Map trên UI |
+| 3 | Shared Attributes để chỉnh ngưỡng từ xa | ✅ Done | `POST /config` + `tb_gateway.py` shared attr → `waste/gateway/config` → `gateway.py` áp ngay |
+| 4 | Health check cho các service trong Compose | ✅ Done | 12/12 service có healthcheck (HTTP / process check) |
+| 5 | Alarm + thông báo khi fire_risk / thùng tràn | ✅ Done | Alarm rules trên ThingsBoard + webhook gateway.py (WEBHOOK_URL env) |
+| 6 | Dự báo thời điểm thùng đầy từ tốc độ tăng | ✅ Done | `GET /bins/{id}/eta` — least-squares regression 15 phút |
+| 7 | Unit test cho rule engine | ✅ Done | 72 test tổng (40 iot_gateway + 32 gateway_api), tất cả pass |
+| 8 | Cơ chế reconnect khi mất kết nối MQTT/ThingsBoard | ✅ Done | `reconnect_delay_set` + SIGTERM handler |
 
-- Cả hai đường (`POST /config` và shared attributes) đều **chỉ publish** lên topic
-  retained `waste/gateway/config`.
-- `iot_gateway/gateway.py` (SV2) **không hề subscribe** topic này → message rơi vào
-  hư không. Tính năng "chỉnh ngưỡng runtime không cần restart" tồn tại trên giấy nhưng
-  KHÔNG có tác dụng thật trước khi sửa.
+**Kết quả: 8/8 yêu cầu nâng cao hoàn thành.**
 
-**Đã vá trong phiên này** (`iot_gateway/gateway.py`):
-- Thêm `TOPIC_CONFIG = "waste/gateway/config"`, subscribe trong `on_connect`.
-- Thêm `handle_config_update(payload)` — áp `payload["thresholds"]` vào `THRESHOLDS`
-  (dataclass mutable dùng chung với `rule_engine.evaluate()`), bỏ qua key lạ/giá trị
-  không hợp lệ, không crash gateway.
-- Test `test_update_takes_effect_immediately_in_rule_engine` chứng minh: hạ
-  `TEMP_FIRE_THRESHOLD` runtime → cùng một bản telemetry chuyển từ "an toàn" sang
-  "fire_risk" ngay lập tức, không cần restart container.
-
-⚠️ File này thuộc phần SV2 — đã sửa để hoàn thiện tính năng SV3 thiết kế, **nên báo cho
-bạn cùng nhóm làm SV2 biết** trước khi merge, tránh xung đột với thay đổi khác của họ.
-
-## 3. Bug đã sửa
+## 3. Bug đã sửa (trong quá trình phát triển SV3)
 
 | File | Bug | Sửa |
 |---|---|---|
-| `iot_gateway/tb_gateway.py` | `main()` tạo `local_client = mqtt.Client(...)` **hai lần liên tiếp** — bản đầu (có `reconnect_delay_set(min_delay=1, max_delay=10)`) bị đè mất, dùng bản hai (reconnect delay mặc định của paho). Rõ ràng là artifact copy-paste. | Xoá block tạo lại, giữ bản có cấu hình reconnect. |
-| `gateway_api/api.py` | `ThresholdConfig` khai báo `fill_dispatch: float = None` (không phải `Optional[float]`). Với Pydantic v2, client gửi tường minh `{"fill_critical": null}` → **422 validation error** thay vì được coi là "không cung cấp" (khác hành vi Pydantic v1 mà code có vẻ được viết theo). | Đổi cả 5 field sang `Optional[float] = None`. |
-| `README.md` | 6 chỗ ghi `http://localhost:8000/...` cho REST API, nhưng `docker-compose.yml` map `"8001:8000"` (do bạn đổi port lúc port 8000 bị Docker khác chiếm trên máy). Ai theo README sẽ gọi nhầm port. | Đổi toàn bộ thành `localhost:8001`. |
-| `iot_gateway/tb_gateway.py` | **Phát hiện khi test thật trên Docker** (không lộ ra khi chỉ chạy unit test mock): `tb_on_connect` gửi `client.publish("v1/gateway/attributes/request", {"sharedKeys": "..."})` — sai API. Topic `v1/gateway/attributes/request` là API xin attributes của một **sub-device cụ thể** (cần `{"id","device","keys"}`), còn payload `{"sharedKeys":...}` là format của API **device chính nó** (`v1/devices/me/attributes/request/{id}`). ThingsBoard nhận message sai format và disconnect ngay sau mỗi lần connect → vòng lặp connect/disconnect (rc=7) mỗi ~1.5s, không bao giờ giữ được kết nối ổn định. | Đổi sang đúng topic `v1/devices/me/attributes/request/1` + subscribe `v1/devices/me/attributes` (push) và `v1/devices/me/attributes/response/+`. Đã verify chạy ổn định >30s không disconnect, 3 sub-device connect thành công. |
-| `iot_gateway/tb_gateway.py` | `main()` chỉ bắt `KeyboardInterrupt` (SIGINT) trong `try/except/finally` dọn dẹp kết nối. `docker stop`/compose recreate gửi **SIGTERM**, không phải SIGINT → process bị kill thẳng, không gửi MQTT DISCONNECT sạch tới ThingsBoard, để lại session "ma" có thể góp phần gây flapping ở lần connect kế tiếp. | Thêm `signal.signal(signal.SIGTERM, ...)` raise `KeyboardInterrupt` để tái dùng đúng nhánh dọn dẹp đã có. |
+| `tb_gateway.py` | Tạo `local_client` hai lần (artifact copy-paste), bản có `reconnect_delay_set` bị đè | Xoá block thứ hai |
+| `gateway_api/api.py` | `ThresholdConfig` field `float = None` (Pydantic v2 báo 422 khi gửi null) | Đổi sang `Optional[float] = None` |
+| `README.md` | 6 chỗ ghi port 8000, thực tế map 8001 | Sửa toàn bộ |
+| `tb_gateway.py` | `tb_on_connect` dùng sai API topic shared attributes → ThingsBoard disconnect ngay sau mỗi connect | Đổi sang `v1/devices/me/attributes/request/1` |
+| `tb_gateway.py` | Thiếu SIGTERM handler → container dừng không sạch | Thêm `signal.signal(SIGTERM, ...)` |
+| `gateway_api/api.py` | `_get_latest_actuator` dùng `-5m` (như telemetry), actuator chỉ publish khi nhận lệnh → báo no_data sai | Đổi sang `-24h` |
+| `gateway.py` | `waste/gateway/config` không được subscribe → tính năng chỉnh ngưỡng runtime vô tác dụng | Thêm subscribe + `handle_config_update()` |
 
-## 4. Test đã viết (mới — chưa từng có cho phần SV3)
+## 4. API endpoints — tổng hợp đầy đủ
 
-Trước phiên này, **chỉ SV2 có unit test** (`iot_gateway/test_rule_engine.py`). Phần SV3
-(REST API, ThingsBoard bridge) chưa có test nào. Đã bổ sung 3 file, theo đúng triết lý
-"pure function, không cần broker/DB thật" mà `rule_engine.py` đã đặt ra:
+### Bắt buộc (§5.9)
+| Endpoint | Mô tả |
+|---|---|
+| `GET /health` | Trạng thái service + danh sách bins |
+| `GET /bins` | Telemetry mới nhất tất cả bins |
+| `GET /bins/{id}/state` | Telemetry + actuator state của 1 bin |
+| `GET /bins/{id}/events` | 20 event gần nhất của 1 bin (1h) |
+| `POST /bins/{id}/command` | Gửi lệnh thủ công xuống actuator |
+| `GET /collection/route` | Danh sách thùng cần thu gom, sắp theo fill desc |
+| `GET /config` | Ngưỡng rule engine hiện tại |
+| `POST /config` | Cập nhật ngưỡng runtime (không cần restart) |
 
-- **`iot_gateway/test_tb_gateway.py`** (27 test) — tách 5 hàm thuần khỏi `tb_gateway.py`
-  (`rpc_to_command`, `rpc_action_from_params`, `build_telemetry_values`,
-  `build_alarm_values`, `build_gateway_telemetry`, `map_shared_attributes`) để test logic
-  chuyển đổi RPC/telemetry/shared-attributes độc lập với MQTT/ThingsBoard thật. Có thêm
-  4 test cho `tb_on_connect` (mock `client.publish`/`subscribe`) — regression test cho
-  đúng bug "flapping disconnect" mô tả ở mục 3, để không tái diễn nếu ai sửa lại sau này.
-- **`iot_gateway/test_gateway_config.py`** (5 test) — test `handle_config_update()` mới
-  thêm, gồm 1 test "đóng vòng lặp" chứng minh update runtime ảnh hưởng `evaluate()` ngay.
-- **`gateway_api/test_api.py`** (17 test) — dùng `fastapi.testclient.TestClient`, mock
-  `mqtt_client.publish` và `query_api.query` (patch `mqtt.Client.connect`/`loop_start`
-  TRƯỚC khi import `api.py`, vì module này tự nối MQTT — retry vô hạn — ngay khi import,
-  nếu không patch thì việc import sẽ treo vô thời hạn khi không có broker thật).
-  Phủ: validate input (target/action sai → 400), 404 cho bin không tồn tại, đúng
-  topic/payload publish khi gửi command, fallback khi InfluxDB lỗi/không có data,
-  endpoint `/config` (GET trả default, POST validate + publish retained).
+### Nâng cao (vượt đề bài)
+| Endpoint | Mô tả | Nâng cao # |
+|---|---|---|
+| `GET /summary` | Tổng quan hệ thống: online/offline/critical/due | — |
+| `GET /bins/offline` | Sensor offline detection theo SENSOR_OFFLINE_TIMEOUT | #1 |
+| `GET /bins/{id}/eta` | ETA dự báo thùng đầy (linear regression 15 phút) | #6 |
 
-**Tổng: 54 test, tất cả pass** (37 trong `iot_gateway`, 17 trong `gateway_api`).
+## 5. Grafana Dashboard — 11 panel
 
-Chạy:
-```bash
-python -m unittest discover -s iot_gateway -p "test_*.py" -v
-python -m unittest discover -s gateway_api -p "test_*.py" -v
-```
-(Cần `fastapi`, `pydantic`, `influxdb-client`, `paho-mqtt` đã cài — xem `requirements.txt`
-từng thư mục. Không cần Docker/broker/InfluxDB thật để chạy test.)
-
-## 5. Việc còn mở / khuyến nghị
-
-| # | Việc | Độ khó | Ai nên làm |
+| # | Panel | Loại | Nguồn dữ liệu |
 |---|---|---|---|
-| 1 | Merge `sv3-thingsboard-restapi` vào `main` (qua PR, theo đúng quy trình repo đã dùng cho SV1/SV2 — xem `git log --all` có PR #1, #2) | Thấp | Bạn (SV3), nhưng nên có teammate review vì đụng `gateway.py` |
-| 2 | Thông báo cho SV2 về thay đổi trong `gateway.py` (subscribe topic config mới) | Thấp | Bạn |
-| 3 | Health check cho `gateway-api`/`grafana`/`tb-gateway` trong `docker-compose.yml` (mosquitto, influxdb đã có) | Thấp | SV3 |
-| 4 | Đồng bộ version pin `paho-mqtt` — `gateway_api` ghim `==1.6.1`, `iot_gateway` ghim `>=2.0.0`. Không phải bug (cả hai đều chạy được do code không dùng API mới ở `api.py`), nhưng nên thống nhất 1 version cho dễ bảo trì | Thấp | Tuỳ chọn |
-| 5 | Tạo Alarm rule + Dashboard trên ThingsBoard Cloud UI, chụp ảnh cho báo cáo | Thấp, không cần code | Bạn |
-| 6 | Test tích hợp thật (docker compose up + curl + mosquitto_pub/sub) — hiện chỉ có unit test mock | Trung bình | Tuỳ chọn, nếu muốn chắc chắn hơn trước khi nộp |
+| 1 | Mức đầy theo thùng (fill_level %) | timeseries | bin_telemetry.fill_level |
+| 2 | Khối lượng theo thùng (weight_kg) | timeseries | bin_telemetry.weight_kg |
+| 3 | Nhiệt độ theo thùng (°C) | timeseries | bin_telemetry.temperature |
+| 4 | Methane theo thùng (ppm) | timeseries | bin_telemetry.methane_ppm |
+| 5 | Trạng thái thiết bị (lock/compactor/buzzer/dispatch) | table | actuator_status |
+| 6 | Số event theo thời gian | timeseries | gateway_events |
+| 7 | Thùng cần thu gom hiện tại (fill > 85%) | table | bin_telemetry.fill_level |
+| 8 | Event gần nhất | table | gateway_events |
+| 9 | **[Nâng cao]** Tốc độ tăng mức đầy (%/phút) | timeseries | derivative(fill_level) |
+| 10 | **[Nâng cao]** Trạng thái sensor (Online/Offline) | table | last seen time |
+| 11 | **[Nâng cao]** Dự báo thời điểm đầy (ETA) | table | linear regression fill_level |
 
-## 6. Trạng thái Git
+## 6. Test suite
 
-- Branch làm việc: `sv3-thingsboard-restapi`, đã có commit `36cc654` **đã push lên
-  `origin/sv3-thingsboard-restapi`** từ phiên trước.
-- Phiên này có thêm các thay đổi (bug fix + tests + README) **chưa commit** tại thời điểm
-  viết file này — xem `git status` / `git diff` để commit trước khi push tiếp.
-- `origin/main` vẫn ở `dd2489f` (trước SV3) — cần tạo Pull Request `sv3-thingsboard-restapi → main`
-  để teammate review, khớp quy trình đã dùng cho SV1 (`PR #1`) và SV2 (`PR #2`).
+```bash
+python -m unittest discover -s iot_gateway -p "test_*.py" -v   # 40 test
+python -m unittest discover -s gateway_api -p "test_*.py" -v   # 32 test
+# Tổng: 72 test, tất cả pass. Không cần Docker/broker/InfluxDB thật.
+```
+
+Phân bổ theo file:
+- `iot_gateway/test_rule_engine.py` — rule engine (SV2, nhóm có sẵn)
+- `iot_gateway/test_tb_gateway.py` — 27 test: pure functions + regression bug ThingsBoard
+- `iot_gateway/test_gateway_config.py` — 5 test: handle_config_update runtime
+- `gateway_api/test_api.py` — 32 test: tất cả endpoint, validate, mock MQTT + InfluxDB
+
+## 7. Demo nâng cao
+
+Chạy script minh họa tất cả 8 nâng cao:
+```bash
+bash scripts/demo-nang-cao.sh
+```
+
+Script sẽ:
+- Gọi từng endpoint theo thứ tự nâng cao #1→#8
+- In kết quả thực tế, kết hợp hướng dẫn cho bước cần thao tác UI
+- Chạy toàn bộ test suite
+- In bảng tổng kết cuối
+
+## 8. Cấu hình thông báo webhook (nâng cao #5)
+
+Thêm vào `.env`:
+```env
+WEBHOOK_URL=https://webhook.site/<your-uuid>   # URL nhận HTTP POST
+WEBHOOK_SEVERITY=critical                        # critical | warning | all
+```
+
+Tương thích với Slack Incoming Webhooks, Discord Webhooks, webhook.site, n8n, Make (Integromat), bất kỳ dịch vụ nhận HTTP POST nào.
+
+## 9. Trạng thái Git
+
+- Branch làm việc: `feat/dashboard-thingsboard-report` (rebase từ `sv3-thingsboard-restapi`)
+- Commit mới nhất: `4708833` (docs: báo cáo 26 trang)
+- `main`: đã merge PR #4 (`sv3-thingsboard-restapi`) — có toàn bộ code SV3 cơ bản
+- Các cải tiến mới nhất (Grafana 11 panel, API 3 endpoint, webhook, health check) đang trên `feat/dashboard-thingsboard-report` — cần merge vào `main` trước khi nộp
+
+## 10. Việc còn cần làm trước khi nộp
+
+| # | Việc | Ai | Ghi chú |
+|---|---|---|---|
+| 1 | Merge `feat/dashboard-thingsboard-report` vào `main` | SV3 (bạn) | PR hoặc merge trực tiếp |
+| 2 | Thêm Markers Map widget trên ThingsBoard dashboard | Bạn (UI) | Toạ độ đã push sẵn |
+| 3 | Cấu hình WEBHOOK_URL trong `.env` để test notification | Bạn | webhook.site miễn phí |
+| 4 | Thông báo SV2 về thay đổi trong `gateway.py` (subscribe config topic) | Bạn | Trước khi merge |

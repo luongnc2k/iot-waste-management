@@ -136,8 +136,67 @@ curl -X POST http://localhost:8001/bins/bin-01/command -H "Content-Type: applica
 ## Kịch bản phụ, nếu còn thời gian
 
 * **Vòng đời thu gom đầy đủ.** Theo dõi một thùng từ lúc `fill_level` vượt 85, sự kiện `bin_full` xuất hiện, `dispatch` chuyển on, đến khi gateway tự publish lệnh reset sau `COLLECTION_DELAY` giây và sensor quay về mức đầy gần 0.
-* **Chạy unit test trực tiếp.** `python -m unittest discover -s iot_gateway -p "test_*.py" -v` để cho thấy hơn sáu mươi test đều pass, minh họa phần kiểm thử đã thực hiện.
-* **GET /collection/route.** `curl http://localhost:8001/collection/route` để cho thấy endpoint vừa hoàn thiện, trả về danh sách thùng cần thu gom sắp theo mức đầy giảm dần.
+* **Chạy unit test trực tiếp.** `python -m unittest discover -s iot_gateway -p "test_*.py" -v` để cho thấy 72 test đều pass, minh họa phần kiểm thử đã thực hiện.
+* **GET /collection/route.** `curl http://localhost:8001/collection/route` để cho thấy danh sách thùng cần thu gom sắp theo mức đầy giảm dần.
+
+---
+
+## Bonus: Demo 8 yêu cầu nâng cao §5.17 (một lệnh)
+
+Chạy script demo tổng hợp (bao gồm tất cả nâng cao):
+```bash
+bash scripts/demo-nang-cao.sh
+```
+
+Hoặc demo từng điểm nhanh bằng curl:
+
+### Nâng cao #1 — Tối ưu lộ trình thu gom
+```bash
+curl -s http://localhost:8001/collection/route | python3 -m json.tool
+```
+
+### Nâng cao #3 — Chỉnh ngưỡng runtime qua REST API (không restart)
+```bash
+# Hạ ngưỡng nhiệt độ để ép sự kiện fire_risk xuất hiện nhanh
+curl -X POST http://localhost:8001/config \
+  -H "Content-Type: application/json" \
+  -d '{"temp_fire": 30}'
+# Xem gateway áp ngay: docker compose logs -f waste-gateway | grep CONFIG
+```
+
+### Nâng cao #4 — Health check tất cả 12 container
+```bash
+docker compose ps --format "table {{.Name}}\t{{.Status}}"
+# Tất cả phải hiện (healthy)
+```
+
+### Nâng cao #5 — Webhook thông báo khi có sự kiện critical
+```bash
+# Xem log webhook trong container gateway
+docker compose logs -f waste-gateway | grep WEBHOOK
+```
+
+### Nâng cao #6 — Dự báo thời điểm thùng đầy (ETA)
+```bash
+curl -s http://localhost:8001/bins/bin-01/eta | python3 -m json.tool
+# Kết quả: eta_minutes, eta_timestamp, fill_rate_per_minute, confidence
+```
+
+### Tổng quan hệ thống (endpoint bonus)
+```bash
+curl -s http://localhost:8001/summary | python3 -m json.tool
+# online: 3, offline: 0, due_for_collection: ?, critical: ?
+
+curl -s http://localhost:8001/bins/offline | python3 -m json.tool
+# Danh sách thùng im lặng > 30s
+```
+
+### Nâng cao #7 — Unit test
+```bash
+python -m unittest discover -s iot_gateway -p "test_*.py"
+python -m unittest discover -s gateway_api -p "test_*.py"
+# Tổng: 72 test, tất cả pass
+```
 
 ## Dọn dẹp sau demo
 
