@@ -66,6 +66,15 @@ services:
       - influxdb
     networks:
       - iot_net
+    healthcheck:
+      # Không có cổng HTTP để gọi nên kiểm tra tiến trình chính (PID 1) còn
+      # sống — đủ để Docker phát hiện process đã chết (ví dụ unhandled
+      # exception) dù container vẫn "Up" do restart policy chưa kịp chạy lại.
+      test: ["CMD-SHELL", "grep -q gateway.py /proc/1/cmdline"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   # ── Virtual Sensors ─────────────────────────────────────────────────────
@@ -85,6 +94,12 @@ services:
       - mosquitto
     networks:
       - iot_net
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q sensor.py /proc/1/cmdline"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   sensor-bin-02:
@@ -103,6 +118,12 @@ services:
       - mosquitto
     networks:
       - iot_net
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q sensor.py /proc/1/cmdline"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   sensor-bin-03:
@@ -122,6 +143,12 @@ services:
       - mosquitto
     networks:
       - iot_net
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q sensor.py /proc/1/cmdline"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   # ── Virtual Actuators ───────────────────────────────────────────────────
@@ -140,6 +167,12 @@ services:
       - mosquitto
     networks:
       - iot_net
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q actuator.py /proc/1/cmdline"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   actuator-bin-02:
@@ -157,6 +190,12 @@ services:
       - mosquitto
     networks:
       - iot_net
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q actuator.py /proc/1/cmdline"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   actuator-bin-03:
@@ -174,6 +213,12 @@ services:
       - mosquitto
     networks:
       - iot_net
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q actuator.py /proc/1/cmdline"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   # ── Grafana Dashboard (SV3) ─────────────────────────────────────────────
@@ -193,6 +238,14 @@ services:
       - influxdb
     networks:
       - iot_net
+    healthcheck:
+      # Ảnh grafana/grafana dựa trên Alpine, có wget sẵn (không có curl).
+      # /api/health là endpoint chính thức của Grafana để kiểm tra service.
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     restart: unless-stopped
 
   # ── REST API (SV3) ──────────────────────────────────────────────────────
@@ -216,6 +269,14 @@ services:
       - influxdb
     networks:
       - iot_net
+    healthcheck:
+      # python:3.11-slim không có curl/wget, nhưng luôn có python3 — dùng
+      # thẳng urllib để gọi đúng endpoint GET /health đã có sẵn của FastAPI.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   # ── ThingsBoard Gateway Bridge (SV3) ────────────────────────────────────
@@ -238,6 +299,12 @@ services:
       - iot_net
     profiles:
       - thingsboard
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q tb_gateway.py /proc/1/cmdline"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
 volumes:
