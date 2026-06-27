@@ -493,6 +493,264 @@
         ]
       },
       "description": "20–30 event gần nhất kèm severity, value, threshold."
+    },
+    {
+      "id": 9,
+      "title": "Tốc độ tăng mức đầy (% / phút)",
+      "description": "Derivative của fill_level — nâng cao #6: cơ sở tính ETA dự báo thùng đầy",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb_iot"
+          },
+          "refId": "A",
+          "query": "from(bucket: \"iot\")\n  |> range(start: -15m)\n  |> filter(fn: (r) => r._measurement == \"bin_telemetry\")\n  |> filter(fn: (r) => r._field == \"fill_level\")\n  |> derivative(unit: 1m, nonNegative: false)\n  |> map(fn: (r) => ({r with _field: r.bin_id}))\n  |> group(columns: [\"_field\"])"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Trạng thái sensor (Online / Offline)",
+      "description": "Nâng cao #1: sensor offline detection — thùng nào im lặng > 30s bị đánh dấu offline",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "fill_level"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "age_s"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 20
+                    },
+                    {
+                      "color": "red",
+                      "value": 30
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "age_s",
+            "desc": true
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb_iot"
+          },
+          "refId": "A",
+          "query": "from(bucket: \"iot\")\n  |> range(start: -1m)\n  |> filter(fn: (r) => r._measurement == \"bin_telemetry\")\n  |> filter(fn: (r) => r._field == \"fill_level\" or r._field == \"temperature\" or r._field == \"methane_ppm\")\n  |> last()\n  |> pivot(rowKey: [\"bin_id\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> map(fn: (r) => ({\n       bin_id: r.bin_id,\n       fill_level: r.fill_level,\n       temperature: r.temperature,\n       methane_ppm: r.methane_ppm,\n       last_seen: r._time\n  }))\n  |> group()"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Dự báo thời điểm đầy (linear regression 10 phút)",
+      "description": "Nâng cao #6: slope từ Flux linearRegression() → ETA = (100 - fill_current) / slope_per_min",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "fill_level"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "rate_%/min"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 3
+              },
+              {
+                "id": "custom.width",
+                "value": 100
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 0.5
+                    },
+                    {
+                      "color": "red",
+                      "value": 1.0
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "eta_phut"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "min"
+              },
+              {
+                "id": "custom.width",
+                "value": 100
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 20
+                    },
+                    {
+                      "color": "green",
+                      "value": 60
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "footer": {
+          "show": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb_iot"
+          },
+          "refId": "A",
+          "query": "fill_last = from(bucket: \"iot\")\n  |> range(start: -5m)\n  |> filter(fn: (r) => r._measurement == \"bin_telemetry\" and r._field == \"fill_level\")\n  |> last()\n  |> group(columns: [\"bin_id\"])\n\nfill_rate = from(bucket: \"iot\")\n  |> range(start: -10m)\n  |> filter(fn: (r) => r._measurement == \"bin_telemetry\" and r._field == \"fill_level\")\n  |> derivative(unit: 1m, nonNegative: false)\n  |> mean()\n  |> group(columns: [\"bin_id\"])\n\njoin(tables: {last: fill_last, rate: fill_rate}, on: [\"bin_id\"])\n  |> map(fn: (r) => ({\n       bin_id: r.bin_id,\n       fill_level: r._value_last,\n       \"rate_%/min\": r._value_rate,\n       eta_phut: if r._value_rate > 0.0 then (100.0 - r._value_last) / r._value_rate else 9999.0\n  }))\n  |> group()"
+        }
+      ]
     }
   ]
 }

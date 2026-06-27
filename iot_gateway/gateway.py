@@ -30,6 +30,8 @@ import os
 import json
 import time
 import threading
+import urllib.request
+import urllib.error
 from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
@@ -74,6 +76,13 @@ COLLECTION_DELAY = float(os.environ.get("COLLECTION_DELAY", "20"))
 # Chu kỳ chạy vòng lặp bảo trì (offline-detect + thu gom).
 MAINTENANCE_INTERVAL = float(os.environ.get("MAINTENANCE_INTERVAL", "5"))
 
+# Webhook URL để thông báo khi sự kiện critical xảy ra (§5.17.5 Alarm+thông báo).
+# Bỏ trống = tắt, có thể dùng webhook.site, Discord, Slack, n8n, hay bất kỳ URL nào.
+# Ví dụ: WEBHOOK_URL=https://hooks.slack.com/services/xxx/yyy/zzz
+#         WEBHOOK_URL=https://webhook.site/xxxx
+WEBHOOK_URL      = os.environ.get("WEBHOOK_URL", "")
+WEBHOOK_SEVERITY = os.environ.get("WEBHOOK_SEVERITY", "critical")  # "critical" | "warning" | "all"
+
 # Wildcard subscribe — 1 lệnh bắt mọi thùng (lý do thiết kế topic của SV1).
 TOPIC_TELEMETRY_WILDCARD = "waste/+/sensor/telemetry"
 TOPIC_STATUS_WILDCARD    = "waste/+/actuator/status"
@@ -100,6 +109,53 @@ _THRESHOLD_ENV_TO_FIELD = {
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _send_webhook(event_payload: dict) -> None:
+    """Gửi thông báo HTTP POST tới WEBHOOK_URL khi có sự kiện đáng chú ý.
+
+    Chạy trên một thread riêng để không block callback MQTT. Lỗi mạng được
+    log ra console nhưng KHÔNG raise — gateway tiếp tục chạy bình thường.
+    Payload tương thích với Slack Incoming Webhooks, Discord Webhooks, và
+    dịch vụ HTTP-to-SMS/Telegram như n8n hoặc webhook.site.
+    """
+    if not WEBHOOK_URL:
+        return
+    severity = event_payload.get("severity", "")
+    if WEBHOOK_SEVERITY != "all" and severity != WEBHOOK_SEVERITY:
+        return
+
+    bin_id = event_payload.get("bin_id", "?")
+    event_type = event_payload.get("event_type", "?")
+    value = event_payload.get("value", "?")
+    threshold = event_payload.get("threshold", "?")
+    ts = event_payload.get("timestamp", _now_iso())
+
+    # Slack / Discord / generic webhook — cùng field "text" và "content"
+    body = json.dumps({
+        "text": (
+            f"🚨 *[{severity.upper()}]* Thùng `{bin_id}` — {event_type}\n"
+            f"Giá trị: {value} | Ngưỡng: {threshold} | {ts}"
+        ),
+        "content": (
+            f"🚨 [{severity.upper()}] Thùng {bin_id} — {event_type} "
+            f"(val={value} thr={threshold}) {ts}"
+        ),
+    }).encode()
+
+    def _post():
+        try:
+            req = urllib.request.Request(
+                WEBHOOK_URL, data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                print(f"[{GATEWAY_ID}] WEBHOOK {resp.status} ← {event_type} {bin_id}")
+        except urllib.error.URLError as exc:
+            print(f"[{GATEWAY_ID}] WEBHOOK ERROR: {exc}")
+
+    threading.Thread(target=_post, daemon=True).start()
 
 
 def _bin_id_from_topic(topic: str) -> str:
@@ -203,6 +259,7 @@ def handle_telemetry(client, store: StateStore, influx: InfluxWriter, topic: str
         }
         client.publish(f"waste/{bin_id}/gateway/event", json.dumps(event_payload), qos=1)
         influx.write_event(bin_id, et, ev)
+        _send_webhook(event_payload)
         print(f"[{GATEWAY_ID}] EVENT {bin_id}: {et} ({ev['severity']}) "
               f"value={ev['value']} thr={ev['threshold']}")
 
@@ -293,6 +350,7 @@ def maintenance_loop(client, store: StateStore, influx: InfluxWriter, stop: thre
             }
             client.publish(f"waste/{bin_id}/gateway/event", json.dumps(payload), qos=1)
             influx.write_event(bin_id, "sensor_offline", ev)
+            _send_webhook(payload)
             print(f"[{GATEWAY_ID}] EVENT {bin_id}: sensor_offline (warning)")
         for bin_id in recovered:
             print(f"[{GATEWAY_ID}] {bin_id} đã gửi telemetry trở lại (online)")
