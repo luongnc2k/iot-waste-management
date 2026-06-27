@@ -390,6 +390,16 @@ Các endpoint đọc trạng thái và sự kiện truy vấn trực tiếp vào
 
 Một lỗi khác chỉ lộ ra trong lúc tập demo: endpoint \texttt{GET /bins/\{id\}/state} có lúc báo \texttt{actuator} là \texttt{no\_data} dù thiết bị vẫn đang ở một trạng thái hợp lệ. Nguyên nhân nằm ở cửa sổ thời gian của câu truy vấn Flux. Hàm lấy telemetry mới nhất dùng \texttt{range(start: -5m)}, hợp lý vì sensor publish liên tục mỗi năm đến bảy giây nên luôn có dữ liệu trong năm phút gần nhất. Hàm lấy trạng thái actuator lại copy nguyên cửa sổ đó, nhưng actuator chỉ publish khi nhận lệnh mới, không publish định kỳ. Một thùng đã khóa nắp từ mười lăm phút trước, nếu không có lệnh nào khác xảy ra trong khoảng đó, sẽ bị API báo nhầm thành không có dữ liệu dù trạng thái khóa vẫn còn nguyên. Khi rà lại, nhóm em thấy panel Grafana "Trạng thái thiết bị theo thùng" đã dùng đúng cửa sổ hai mươi bốn giờ cho measurement \texttt{actuator\_status}, nên chỉ cần sửa REST API theo đúng cách đó là khớp lại. Đây là một minh chứng nữa cho việc dữ liệu theo chu kỳ và dữ liệu theo sự kiện cần chiến lược truy vấn khác nhau, dù cùng nằm trong một cơ sở dữ liệu.
 
+Ngoài các endpoint trong đề bài, nhóm em bổ sung thêm ba endpoint vượt yêu cầu để hệ thống hoàn thiện hơn về mặt vận hành:
+
+\begin{itemize}[nosep]
+\item \texttt{GET /summary}: Tổng quan tức thì của toàn hệ thống --- số thùng online, offline, số cần thu gom, số ở mức nguy cấp, và trạng thái rút gọn từng bin. Phù hợp cho màn hình giám sát trung tâm hoặc webhook định kỳ.
+
+\item \texttt{GET /bins/offline}: Sensor offline detection theo yêu cầu nâng cao. So sánh timestamp bản ghi mới nhất với biến môi trường \texttt{SENSOR\_OFFLINE\_TIMEOUT}, trả ra hai danh sách rõ ràng: thùng đang online và thùng đã im lặng quá lâu, kèm thời gian bản ghi cuối cùng nhận được.
+
+\item \texttt{GET /bins/\{id\}/eta}: Dự báo thời điểm thùng đầy theo yêu cầu nâng cao. Lấy chuỗi \texttt{fill\_level} trong mười lăm phút gần nhất, áp hồi quy tuyến tính (least-squares) để tính tốc độ tăng trung bình theo phút, rồi suy ra thời điểm đến mức một trăm phần trăm. Kết quả gồm \texttt{eta\_minutes}, \texttt{eta\_timestamp} (ISO 8601 UTC), \texttt{fill\_rate\_per\_minute}, và mức độ tin cậy (\texttt{high} nếu có từ năm điểm trở lên, \texttt{low} nếu ít hơn). Endpoint trả \texttt{null} khi fill\_level đang giảm hoặc đứng yên, không đưa ra dự báo vô nghĩa.
+\end{itemize}
+
 %=============================================================
 \section{Tích hợp ThingsBoard Cloud: uplink và RPC}
 %=============================================================
@@ -483,7 +493,7 @@ docker compose ps
 \caption{Kết quả \texttt{docker compose ps}: mosquitto, influxdb, waste-gateway, ba sensor, ba actuator, grafana và gateway-api đều ở trạng thái Up.}
 \end{figure}
 
-Một lệnh duy nhất dựng toàn bộ hệ thống. Mọi tham số cấu hình đọc từ biến môi trường và file \texttt{.env}, theo đúng nguyên tắc mười hai yếu tố (xem Phụ lục A để biết đầy đủ ý nghĩa từng biến). Các service gọi nhau bằng tên service trong mạng \texttt{iot\_net} do Docker Compose tạo ra, tuyệt đối không dùng \texttt{localhost}. Mosquitto và InfluxDB có healthcheck riêng; mọi service đều đặt chính sách \texttt{restart: unless-stopped}; dữ liệu InfluxDB và Grafana được giữ lại qua named volume kể cả khi container bị xóa và tạo lại. Thành phần ThingsBoard được tách theo profile riêng để chỉ khởi động khi đã có token hợp lệ, tránh lỗi không cần thiết khi chưa cấu hình ThingsBoard.
+Một lệnh duy nhất dựng toàn bộ hệ thống. Mọi tham số cấu hình đọc từ biến môi trường và file \texttt{.env}, theo đúng nguyên tắc mười hai yếu tố (xem Phụ lục A để biết đầy đủ ý nghĩa từng biến). Các service gọi nhau bằng tên service trong mạng \texttt{iot\_net} do Docker Compose tạo ra, tuyệt đối không dùng \texttt{localhost}. Tất cả mười hai service đều có healthcheck: Mosquitto và InfluxDB dùng lệnh kiểm tra tích hợp của chính chúng; Grafana dùng \texttt{wget /api/health} (image Alpine có wget, không có curl); \texttt{gateway-api} dùng \texttt{python3 -c urllib.request.urlopen('/health')} để gọi đúng endpoint FastAPI đã có sẵn; các service không có HTTP port (\texttt{waste-gateway}, sensor, actuator, tb-gateway) dùng \texttt{grep /proc/1/cmdline} để xác nhận tiến trình Python chính còn sống. Mọi service đều đặt chính sách \texttt{restart: unless-stopped}; dữ liệu InfluxDB và Grafana được giữ lại qua named volume kể cả khi container bị xóa và tạo lại. Thành phần ThingsBoard được tách theo profile riêng để chỉ khởi động khi đã có token hợp lệ, tránh lỗi không cần thiết khi chưa cấu hình ThingsBoard.
 
 Khi cần dừng hệ thống, hai lệnh sau được dùng tùy mục đích:
 \begin{lstlisting}[language=bash]
