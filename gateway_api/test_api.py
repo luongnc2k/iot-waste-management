@@ -13,7 +13,7 @@ import json
 import os
 import sys
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -263,6 +263,146 @@ class TestConfigEndpoints(ApiTestCase):
         self.assertEqual(resp.status_code, 200)
         sent = json.loads(api.mqtt_client.publish.call_args[0][1])
         self.assertEqual(sent["thresholds"], {"FILL_DISPATCH_THRESHOLD": 80.0})
+
+
+class TestSystemSummary(ApiTestCase):
+    """GET /summary — tổng quan hệ thống."""
+
+    def test_structure_always_present(self):
+        resp = self.client.get("/summary")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        for key in ("total_bins", "online", "offline", "due_for_collection", "critical", "bins"):
+            self.assertIn(key, body)
+
+    def test_total_bins_matches_config(self):
+        resp = self.client.get("/summary")
+        self.assertEqual(resp.json()["total_bins"], len(api.BINS))
+
+    def test_offline_when_no_data(self):
+        resp = self.client.get("/summary")
+        body = resp.json()
+        # Không có data → tất cả offline
+        self.assertEqual(body["offline"], len(api.BINS))
+        self.assertEqual(body["online"], 0)
+
+    def test_counts_due_and_critical_bins(self):
+        def fake_query(query, org=None):
+            if "bin_telemetry" in query:
+                return [FakeTable([FakeRecord(
+                    {"fill_level": 97.0, "weight_kg": 50.0, "methane_ppm": 100.0, "temperature": 25.0},
+                    ts=datetime.now(timezone.utc),
+                )])]
+            return []
+
+        api.query_api.query = mock.MagicMock(side_effect=fake_query)
+        resp = self.client.get("/summary")
+        body = resp.json()
+        # 3 bins, đều 97% → critical=3, due=3
+        self.assertEqual(body["critical"], len(api.BINS))
+        self.assertEqual(body["due_for_collection"], len(api.BINS))
+
+
+class TestOfflineBins(ApiTestCase):
+    """GET /bins/offline — sensor offline detection."""
+
+    def test_all_offline_when_no_data(self):
+        resp = self.client.get("/bins/offline")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(len(body["offline"]), len(api.BINS))
+        self.assertEqual(len(body["online"]), 0)
+
+    def test_online_when_fresh_data(self):
+        def fake_query(query, org=None):
+            return [FakeTable([FakeRecord(
+                {"fill_level": 50.0, "weight_kg": 30.0, "methane_ppm": 100.0, "temperature": 25.0},
+                ts=datetime.now(timezone.utc),
+            )])]
+
+        api.query_api.query = mock.MagicMock(side_effect=fake_query)
+        resp = self.client.get("/bins/offline")
+        body = resp.json()
+        self.assertEqual(len(body["online"]), len(api.BINS))
+        self.assertEqual(len(body["offline"]), 0)
+
+    def test_includes_timeout_in_response(self):
+        resp = self.client.get("/bins/offline")
+        self.assertIn("offline_timeout_seconds", resp.json())
+
+
+class TestBinEta(ApiTestCase):
+    """GET /bins/{bin_id}/eta — dự báo thời điểm thùng đầy."""
+
+    def test_unknown_bin_returns_404(self):
+        resp = self.client.get("/bins/bin-does-not-exist/eta")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_unavailable_when_no_data(self):
+        resp = self.client.get(f"/bins/{api.BINS[0]}/eta")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["confidence"], "unavailable")
+        self.assertIsNone(body["eta_minutes"])
+
+    def test_returns_eta_when_fill_increasing(self):
+        now_ts = datetime.now(timezone.utc)
+        # 5 điểm, tăng đều 1%/phút, hiện tại 50%
+        points = [
+            FakeRecord({"fill_level": None}, ts=now_ts),  # sẽ bị override
+        ]
+        # Tạo 5 bản ghi tăng dần: t-4min→46%, t-3min→47%, ... t0→50%
+        records = []
+        for i in range(5):
+            offset = (4 - i) * 60
+            ts = now_ts - timedelta(seconds=offset)
+
+            class _R:
+                def __init__(self, v, t):
+                    self._v = v
+                    self._t = t
+                def get_time(self):
+                    return self._t
+                def get_value(self):
+                    return self._v
+
+            records.append(_R(46.0 + i, ts))
+
+        class _Table:
+            def __init__(self, recs):
+                self.records = recs
+
+        api.query_api.query = mock.MagicMock(return_value=[_Table(records)])
+        resp = self.client.get(f"/bins/{api.BINS[0]}/eta")
+        body = resp.json()
+        # slope ~1%/min, từ 50% → cần 50 phút
+        self.assertIsNotNone(body["eta_minutes"])
+        self.assertGreater(body["eta_minutes"], 0)
+        self.assertIn("eta_timestamp", body)
+        self.assertIn("fill_rate_per_minute", body)
+
+    def test_no_eta_when_fill_stable_or_decreasing(self):
+        now_ts = datetime.now(timezone.utc)
+
+        class _R:
+            def __init__(self, v, t):
+                self._v = v
+                self._t = t
+            def get_time(self):
+                return self._t
+            def get_value(self):
+                return self._v
+
+        class _Table:
+            def __init__(self, recs):
+                self.records = recs
+
+        # 3 điểm, fill_level giảm dần
+        records = [_R(60.0 - i * 2, now_ts - timedelta(seconds=(2 - i) * 60)) for i in range(3)]
+        api.query_api.query = mock.MagicMock(return_value=[_Table(records)])
+        resp = self.client.get(f"/bins/{api.BINS[0]}/eta")
+        body = resp.json()
+        self.assertIsNone(body["eta_minutes"])
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 import json
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import paho.mqtt.client as mqtt
@@ -198,6 +198,188 @@ def update_config(cfg: ThresholdConfig):
     config_msg = {"thresholds": updates, "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
     mqtt_client.publish("waste/gateway/config", json.dumps(config_msg), qos=1, retain=True)
     return {"status": "config_published", "updates": updates}
+
+
+@app.get("/summary")
+def system_summary():
+    """
+    Tổng quan hệ thống tức thì: số thùng đang online, số cần thu gom,
+    số đang báo động, và trạng thái tóm tắt từng bin.
+    Hữu ích cho dashboard overview hoặc màn hình giám sát trung tâm.
+    """
+    fill_threshold = float(os.getenv("FILL_DISPATCH_THRESHOLD", "85"))
+    fill_critical = float(os.getenv("FILL_CRITICAL_THRESHOLD", "95"))
+    offline_timeout = int(os.getenv("SENSOR_OFFLINE_TIMEOUT", "30"))
+
+    now = datetime.now(timezone.utc)
+    bins_summary = []
+    total_online = 0
+    total_due = 0
+    total_critical = 0
+
+    for bin_id in BINS:
+        t = _get_latest_telemetry(bin_id)
+        a = _get_latest_actuator(bin_id)
+
+        if "fill_level" in t:
+            ts = datetime.fromisoformat(t["timestamp"].replace("Z", "+00:00"))
+            age_s = (now - ts).total_seconds()
+            is_online = age_s <= offline_timeout
+        else:
+            is_online = False
+            age_s = None
+
+        fill = t.get("fill_level")
+        is_due = fill is not None and fill > fill_threshold
+        is_crit = fill is not None and fill > fill_critical
+
+        if is_online:
+            total_online += 1
+        if is_due:
+            total_due += 1
+        if is_crit:
+            total_critical += 1
+
+        bins_summary.append({
+            "bin_id": bin_id,
+            "online": is_online,
+            "fill_level": fill,
+            "due_for_collection": is_due,
+            "critical": is_crit,
+            "actuator_lock": a.get("lock"),
+            "data_age_seconds": round(age_s, 1) if age_s is not None else None,
+        })
+
+    return {
+        "total_bins": len(BINS),
+        "online": total_online,
+        "offline": len(BINS) - total_online,
+        "due_for_collection": total_due,
+        "critical": total_critical,
+        "bins": bins_summary,
+        "timestamp": now.isoformat(),
+    }
+
+
+@app.get("/bins/offline")
+def get_offline_bins():
+    """
+    Danh sách thùng chưa gửi telemetry trong SENSOR_OFFLINE_TIMEOUT giây.
+    Sensor_offline detection theo §5.17 nâng cao.
+    """
+    offline_timeout = int(os.getenv("SENSOR_OFFLINE_TIMEOUT", "30"))
+    now = datetime.now(timezone.utc)
+    offline = []
+    online = []
+
+    for bin_id in BINS:
+        t = _get_latest_telemetry(bin_id)
+        if "fill_level" not in t:
+            offline.append({"bin_id": bin_id, "last_seen": None, "age_seconds": None})
+            continue
+
+        ts = datetime.fromisoformat(t["timestamp"].replace("Z", "+00:00"))
+        age_s = (now - ts).total_seconds()
+        entry = {"bin_id": bin_id, "last_seen": ts.isoformat(), "age_seconds": round(age_s, 1)}
+        if age_s > offline_timeout:
+            offline.append(entry)
+        else:
+            online.append(entry)
+
+    return {
+        "offline_timeout_seconds": offline_timeout,
+        "offline": offline,
+        "online": online,
+    }
+
+
+@app.get("/bins/{bin_id}/eta")
+def get_bin_eta(bin_id: str):
+    """
+    Dự báo thời điểm thùng đầy dựa trên tốc độ tăng fill_level trong 15 phút
+    gần nhất (§5.17 nâng cao #6). Dùng hồi quy tuyến tính đơn giản (least-
+    squares slope) trên chuỗi thời gian — đủ chính xác cho bài toán mô phỏng,
+    không cần thư viện ML nặng.
+
+    Trả về:
+    - eta_minutes: số phút ước tính đến khi thùng đầy (null nếu không tính được)
+    - eta_timestamp: thời điểm dự kiến thùng đầy (ISO 8601 UTC)
+    - fill_rate_per_minute: tốc độ tăng (% / phút), âm = đang giảm
+    - confidence: "high" (>=5 điểm), "low" (<5), "unavailable"
+    """
+    if bin_id not in BINS:
+        raise HTTPException(status_code=404, detail=f"Bin {bin_id} not found")
+
+    query = f'''
+    from(bucket: "{INFLUXDB_BUCKET}")
+      |> range(start: -15m)
+      |> filter(fn: (r) => r._measurement == "bin_telemetry")
+      |> filter(fn: (r) => r.bin_id == "{bin_id}")
+      |> filter(fn: (r) => r._field == "fill_level")
+      |> sort(columns: ["_time"])
+    '''
+    try:
+        tables = query_api.query(query, org=INFLUXDB_ORG)
+        points = []
+        for table in tables:
+            for record in table.records:
+                ts_epoch = record.get_time().timestamp()
+                val = record.get_value()
+                if val is not None:
+                    points.append((ts_epoch, float(val)))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"InfluxDB query failed: {e}")
+
+    if len(points) < 2:
+        return {
+            "bin_id": bin_id,
+            "eta_minutes": None,
+            "eta_timestamp": None,
+            "fill_rate_per_minute": None,
+            "current_fill": points[0][1] if points else None,
+            "confidence": "unavailable",
+            "note": "Không đủ dữ liệu để tính xu hướng (cần ít nhất 2 điểm trong 15 phút)",
+        }
+
+    # Least-squares linear regression: y = a*x + b, tính slope a
+    n = len(points)
+    t0 = points[0][0]
+    xs = [p[0] - t0 for p in points]
+    ys = [p[1] for p in points]
+    mean_x = sum(xs) / n
+    mean_y = sum(ys) / n
+    ss_xy = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    ss_xx = sum((x - mean_x) ** 2 for x in xs)
+
+    slope_per_sec = ss_xy / ss_xx if ss_xx > 0 else 0.0
+    fill_rate_per_minute = round(slope_per_sec * 60, 4)
+    current_fill = ys[-1]
+
+    confidence = "high" if n >= 5 else "low"
+
+    if slope_per_sec <= 0:
+        return {
+            "bin_id": bin_id,
+            "eta_minutes": None,
+            "eta_timestamp": None,
+            "fill_rate_per_minute": fill_rate_per_minute,
+            "current_fill": current_fill,
+            "confidence": confidence,
+            "note": "Thùng không tăng mức đầy (ổn định hoặc đang giảm)",
+        }
+
+    seconds_to_full = (100.0 - current_fill) / slope_per_sec
+    eta_dt = datetime.fromtimestamp(points[-1][0], tz=timezone.utc) + timedelta(seconds=seconds_to_full)
+    eta_minutes = round(seconds_to_full / 60, 1)
+
+    return {
+        "bin_id": bin_id,
+        "eta_minutes": eta_minutes,
+        "eta_timestamp": eta_dt.isoformat(),
+        "fill_rate_per_minute": fill_rate_per_minute,
+        "current_fill": current_fill,
+        "confidence": confidence,
+    }
 
 
 def _get_latest_telemetry(bin_id: str) -> dict:
