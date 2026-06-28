@@ -1,13 +1,15 @@
 import json
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 import paho.mqtt.client as mqtt
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from influxdb_client import InfluxDBClient
+
+from gateway_api.eta_predictor import predict_eta
 
 MQTT_BROKER = os.getenv("MQTT_BROKER", "mosquitto")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
@@ -330,56 +332,7 @@ def get_bin_eta(bin_id: str):
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"InfluxDB query failed: {e}")
 
-    if len(points) < 2:
-        return {
-            "bin_id": bin_id,
-            "eta_minutes": None,
-            "eta_timestamp": None,
-            "fill_rate_per_minute": None,
-            "current_fill": points[0][1] if points else None,
-            "confidence": "unavailable",
-            "note": "Không đủ dữ liệu để tính xu hướng (cần ít nhất 2 điểm trong 15 phút)",
-        }
-
-    # Least-squares linear regression: y = a*x + b, tính slope a
-    n = len(points)
-    t0 = points[0][0]
-    xs = [p[0] - t0 for p in points]
-    ys = [p[1] for p in points]
-    mean_x = sum(xs) / n
-    mean_y = sum(ys) / n
-    ss_xy = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
-    ss_xx = sum((x - mean_x) ** 2 for x in xs)
-
-    slope_per_sec = ss_xy / ss_xx if ss_xx > 0 else 0.0
-    fill_rate_per_minute = round(slope_per_sec * 60, 4)
-    current_fill = ys[-1]
-
-    confidence = "high" if n >= 5 else "low"
-
-    if slope_per_sec <= 0:
-        return {
-            "bin_id": bin_id,
-            "eta_minutes": None,
-            "eta_timestamp": None,
-            "fill_rate_per_minute": fill_rate_per_minute,
-            "current_fill": current_fill,
-            "confidence": confidence,
-            "note": "Thùng không tăng mức đầy (ổn định hoặc đang giảm)",
-        }
-
-    seconds_to_full = (100.0 - current_fill) / slope_per_sec
-    eta_dt = datetime.fromtimestamp(points[-1][0], tz=timezone.utc) + timedelta(seconds=seconds_to_full)
-    eta_minutes = round(seconds_to_full / 60, 1)
-
-    return {
-        "bin_id": bin_id,
-        "eta_minutes": eta_minutes,
-        "eta_timestamp": eta_dt.isoformat(),
-        "fill_rate_per_minute": fill_rate_per_minute,
-        "current_fill": current_fill,
-        "confidence": confidence,
-    }
+    return predict_eta(bin_id, points).to_dict()
 
 
 def _get_latest_telemetry(bin_id: str) -> dict:
