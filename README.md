@@ -1,200 +1,340 @@
 # Virtual Smart Waste Management Gateway
 
-**Đề tài 2.5** — IT6130 Lập trình và Ảo hóa cho IoT (HUST)
+**Đề tài 2.5** — IT6130 Lập trình và Ảo hóa cho IoT, HUST
 
-Hệ thống IoT gateway ảo giám sát thùng rác thông minh: theo dõi mức đầy, nhiệt độ, khí methane, phát hiện bất thường bằng rule engine, điều khiển actuator tự động, đồng bộ hai chiều với ThingsBoard Cloud.
+Hệ thống IoT gateway ảo giám sát ba thùng rác thông minh theo thời gian thực: theo dõi mức đầy, nhiệt độ, khí methane, phát hiện bất thường bằng rule engine tại biên, điều khiển actuator tự động, lưu trữ chuỗi thời gian vào InfluxDB, trực quan hóa qua Grafana và đồng bộ hai chiều với ThingsBoard Cloud.
+
+## Nhóm thực hiện
+
+| Sinh viên | MSSV | Phụ trách |
+|---|---|---|
+| Ngô Văn Quang | 20251243M | Virtual sensor, virtual actuator, thiết kế MQTT topic |
+| Nguyễn Cao Lương | 20251244M | Edge gateway, rule engine, InfluxDB, unit test |
+| TRƯƠNG Tuấn Nghĩa | 20251196M | REST API, ThingsBoard, Grafana, Docker Compose |
 
 ## Kiến trúc hệ thống
 
 ```
-┌─────────────────┐         ┌───────────────┐         ┌──────────────┐
-│ Virtual Sensors │─publish─▶│  Mosquitto    │◀─sub────│  Edge IoT    │
-│ bin-01/02/03    │         │  MQTT Broker  │─forward─▶│  Gateway     │
-└─────────────────┘         │  (:1883)      │         │  (SV2)       │
-                            └───────────────┘         └──────┬───────┘
-┌─────────────────┐              ▲                           │
-│ Virtual Actuators│◀─command────┘         ┌─────────────────┼─────────────┐
-│ lock/compactor/ │                        │                 │             │
-│ buzzer/dispatch │                        ▼                 ▼             ▼
-└─────────────────┘               ┌──────────────┐  ┌────────────┐  ┌──────────┐
-                                  │  InfluxDB    │  │  Grafana   │  │ThingsBoard│
-┌─────────────────┐               │  (:8086)     │  │  (:3000)   │  │  Cloud   │
-│ FastAPI REST API│◀─query────────┤              │  └────────────┘  └──────────┘
-│ (:8000)         │               └──────────────┘
-└─────────────────┘
+Sensor bin-01/02/03          MQTT Broker           Edge Gateway
+  (fill, weight,      ──pub──► Mosquitto  ──sub──►  validate → normalize
+   methane, temp)             :1883                  rule engine → event
+         ▲                       ▲                   write InfluxDB
+         │                       │                        │
+       reset                  command                     │ command
+         │                       │                        │
+Actuator bin-01/02/03 ──status──►│◄──────────────────────┘
+  lock / compactor /
+  buzzer / dispatch                    InfluxDB ◄─── REST API (FastAPI)
+                                         :8086           :8001
+                                           │
+                                        Grafana       ThingsBoard Cloud
+                                         :3000     (tb-gateway bridge)
 ```
 
-## Luồng dữ liệu
+## Yêu cầu
 
-1. **Sensor** publish telemetry (fill_level, weight, methane, temperature) mỗi 5s
-2. **MQTT Broker** forward đến Gateway
-3. **Gateway** validate → normalize → rule engine → ghi InfluxDB → gửi command
-4. **Actuator** nhận command → cập nhật state → publish status
-5. **Grafana** query InfluxDB → hiển thị dashboard
-6. **ThingsBoard** nhận telemetry từ gateway bridge → dashboard cloud + RPC
+- Docker Desktop ≥ 4.x với Docker Compose v2
+- Python ≥ 3.10 (chỉ cần cho unit test, không cần cho chạy Docker)
+- (Tùy chọn) Tài khoản ThingsBoard Cloud để demo tích hợp đám mây
 
-## Phân công nhóm
+## Khởi động
 
-| SV | Nhiệm vụ | Thư mục |
-|---|---|---|
-| SV1 | Virtual sensor, virtual actuator, thiết kế topic/message | `virtual_sensor/`, `virtual_actuator/`, `docs/` |
-| SV2 | Edge gateway, rule engine, ghi InfluxDB | `iot_gateway/gateway.py`, `rule_engine.py`, `influx_writer.py` |
-| SV3 | ThingsBoard integration, REST API, Docker Compose, Grafana, README | `gateway_api/`, `iot_gateway/tb_gateway.py`, `grafana/`, `docker-compose.yml` |
-
-## Cài đặt và chạy
-
-### Yêu cầu
-- Docker Desktop (có Docker Compose)
-- (Tùy chọn) Tài khoản ThingsBoard Cloud
-
-### Khởi động nhanh
+### 1. Khởi động nhanh — toàn bộ stack
 
 ```bash
-# Clone repo
 git clone https://github.com/luongnc2k/iot-waste-management.git
 cd iot-waste-management
 
-# Tạo file .env từ mẫu
-cp .env.example .env
-
-# Build và chạy toàn bộ stack
+cp .env.example .env      # sao chép cấu hình mặc định
 docker compose up -d --build
+```
 
-# Kiểm tra trạng thái
+### 2. Kiểm tra stack đã sẵn sàng
+
+```bash
 docker compose ps
 ```
 
-### Truy cập
-
-| Service | URL | Tài khoản |
-|---|---|---|
-| REST API (Swagger) | http://localhost:8001/docs | — |
-| Grafana | http://localhost:3000 | admin / admin |
-| InfluxDB | http://localhost:8086 | admin / admin12345 |
-
-### Xem log
+Tất cả container phải ở trạng thái `Up` hoặc `Up (healthy)`. Các container có healthcheck (`mosquitto`, `influxdb`, `grafana`, `gateway-api`) cần thêm 10–15 giây để chuyển sang `(healthy)`.
 
 ```bash
-docker compose logs -f waste-gateway    # Gateway rule engine
-docker compose logs -f sensor-bin-01    # Sensor data
-docker compose logs -f gateway-api      # REST API
+# Xác nhận REST API phản hồi
+curl -s http://localhost:8001/health | python3 -m json.tool
 ```
 
-### Kiểm tra MQTT
+### 3. Khởi động từng phần (debug)
 
 ```bash
-# Subscribe tất cả telemetry
+# Chỉ khởi động broker và sensor
+docker compose up -d mosquitto sensor-bin-01 sensor-bin-02 sensor-bin-03
+
+# Sau khi sensor đã chạy, khởi động gateway
+docker compose up -d waste-gateway
+
+# Thêm InfluxDB và API
+docker compose up -d influxdb gateway-api
+
+# Thêm Grafana
+docker compose up -d grafana
+```
+
+### 4. Khởi động với ThingsBoard Cloud
+
+```bash
+# Bước 1: Tạo gateway device trên ThingsBoard Cloud
+# - Đăng nhập https://thingsboard.cloud (free tier)
+# - Devices → + → Add new device → Name: waste-gateway → bật "Is gateway" → Add
+# - Mở device vừa tạo → tab Credentials → Copy access token
+
+# Bước 2: Điền token vào .env
+# Mở .env và sửa dòng:  TB_GATEWAY_TOKEN=<token_vừa_copy>
+
+# Bước 3: Khởi động tb-gateway (profile riêng)
+docker compose --profile thingsboard up -d --build tb-gateway
+docker compose logs -f tb-gateway
+# Phải thấy: "Connected to ThingsBoard Cloud" và "Connected device: bin-01"
+```
+
+## Truy cập giao diện
+
+| Service | URL | Tài khoản mặc định |
+|---|---|---|
+| REST API + Swagger UI | http://localhost:8001/docs | — |
+| Grafana Dashboard | http://localhost:3000 | admin / admin |
+| InfluxDB UI | http://localhost:8086 | admin / admin12345 |
+| ThingsBoard Cloud | https://thingsboard.cloud | tài khoản cá nhân |
+
+## Theo dõi log
+
+```bash
+# Gateway: rule engine, event, command gửi đi
+docker compose logs -f waste-gateway
+
+# Sensor: giá trị fill tăng dần
+docker compose logs -f sensor-bin-01
+
+# REST API: request/response
+docker compose logs -f gateway-api
+
+# ThingsBoard bridge
+docker compose logs -f tb-gateway
+
+# Xem log nhiều service cùng lúc
+docker compose logs -f waste-gateway sensor-bin-01 actuator-bin-01
+```
+
+## Kiểm tra MQTT thủ công
+
+```bash
+# Subscribe toàn bộ telemetry (3 thùng)
 docker exec mosquitto mosquitto_sub -t "waste/+/sensor/telemetry" -v
 
-# Subscribe events
+# Subscribe event từ gateway (fire_risk, bin_full, gas_alert, ...)
 docker exec mosquitto mosquitto_sub -t "waste/+/gateway/event" -v
 
-# Gửi lệnh thủ công
+# Subscribe phản hồi actuator
+docker exec mosquitto mosquitto_sub -t "waste/+/actuator/status" -v
+
+# Gửi lệnh thủ công xuống actuator
 docker exec mosquitto mosquitto_pub \
   -t waste/bin-01/actuator/command \
   -m '{"bin_id":"bin-01","target":"dispatch","action":"on","reason":"manual"}'
+
+# Ép fire_risk bằng cách hạ ngưỡng nhiệt độ (không cần restart)
+curl -X POST http://localhost:8001/config \
+  -H "Content-Type: application/json" \
+  -d '{"temp_fire": 25}'
+# Sau vài giây: docker compose logs waste-gateway | grep fire_risk
+# Khôi phục:
+curl -X POST http://localhost:8001/config \
+  -H "Content-Type: application/json" \
+  -d '{"temp_fire": 60}'
 ```
 
-### REST API
+## REST API — danh sách endpoint
 
 ```bash
-# Health check
-curl http://localhost:8001/health
+# Trạng thái tổng quát hệ thống
+curl -s http://localhost:8001/health | python3 -m json.tool
+curl -s http://localhost:8001/summary | python3 -m json.tool
 
-# Xem trạng thái tất cả bins
-curl http://localhost:8001/bins
+# Telemetry mới nhất tất cả bins
+curl -s http://localhost:8001/bins | python3 -m json.tool
 
-# Xem state chi tiết
-curl http://localhost:8001/bins/bin-01/state
+# Trạng thái chi tiết một bin (telemetry + actuator)
+curl -s http://localhost:8001/bins/bin-01/state | python3 -m json.tool
 
-# Xem events gần đây
-curl http://localhost:8001/bins/bin-01/events
+# 20 event gần nhất trong 1 giờ qua
+curl -s http://localhost:8001/bins/bin-01/events | python3 -m json.tool
 
-# Gửi lệnh
+# Danh sách thùng cần thu gom, sắp xếp theo fill giảm dần
+curl -s http://localhost:8001/collection/route | python3 -m json.tool
+
+# Sensor offline detection
+curl -s http://localhost:8001/bins/offline | python3 -m json.tool
+
+# Dự báo thời điểm thùng đầy (OLS linear regression 15 phút)
+curl -s http://localhost:8001/bins/bin-01/eta | python3 -m json.tool
+
+# Xem ngưỡng rule engine hiện tại
+curl -s http://localhost:8001/config | python3 -m json.tool
+
+# Cập nhật ngưỡng không cần restart
+curl -X POST http://localhost:8001/config \
+  -H "Content-Type: application/json" \
+  -d '{"fill_dispatch": 80, "temp_fire": 55}'
+
+# Gửi lệnh điều khiển thủ công
 curl -X POST http://localhost:8001/bins/bin-01/command \
   -H "Content-Type: application/json" \
-  -d '{"target":"dispatch","action":"on","reason":"manual"}'
+  -d '{"target":"buzzer","action":"off","reason":"manual_reset"}'
 ```
 
-### ThingsBoard (tùy chọn)
+Xem toàn bộ endpoint với ví dụ request/response tại http://localhost:8001/docs.
 
-`.env.example` không chứa token thật (mỗi người tự tạo gateway device riêng trên
-ThingsBoard Cloud của mình). Làm theo 5 bước sau:
+## Kiểm tra InfluxDB
 
-1. Đăng ký/đăng nhập https://thingsboard.cloud (free tier đủ dùng cho lab).
-2. **Devices** → nút **+** → **Add new device** → Name: `waste-gateway` → bật
-   toggle **Is gateway** → **Add**.
-3. Mở device `waste-gateway` vừa tạo → tab **Credentials** → **Copy access token**.
-4. Dán token vào `.env`:
-   ```bash
-   echo "TB_GATEWAY_TOKEN=<token_vừa_copy>" >> .env
-   ```
-5. Đảm bảo stack chính đang chạy (`docker compose up -d`), rồi chạy `tb-gateway`:
-   ```bash
-   docker compose --profile thingsboard up -d --build tb-gateway
-   docker logs -f tb-gateway   # phải thấy "Connected to ThingsBoard Cloud"
-                               # và "Connected device: bin-01/02/03", KHÔNG có
-                               # dòng "TB disconnected" lặp lại liên tục
-   ```
+```bash
+# Mở Data Explorer tại http://localhost:8086
+# Login: admin / admin12345, org: hust, bucket: iot
 
-**Kiểm tra kết quả:** vào lại ThingsBoard Cloud → **Devices** → 3 device con
-`bin-01`, `bin-02`, `bin-03` phải tự xuất hiện dưới `waste-gateway` (vài giây sau
-khi sensor publish lần đầu). Click vào một bin → tab **Latest telemetry** → thấy
-`fill_level`, `weight_kg`, `methane_ppm`, `temperature` cập nhật mỗi ~10s.
+# Hoặc query qua CLI:
+docker exec influxdb influx query \
+  --org hust --token dev-token-change-me \
+  'from(bucket:"iot") |> range(start:-10m) |> filter(fn:(r) => r._measurement == "bin_telemetry") |> limit(n:5)'
 
-Nếu log lặp `Connected` → `TB disconnected (rc=7)` liên tục mỗi 1-2s: đó là dấu
-hiệu phiên bản cũ chưa vá bug "shared attributes request sai format" — đảm bảo
-đang chạy code mới nhất của nhánh `sv3-thingsboard-restapi` (xem `SV3-Tasks.md`).
+# Kiểm tra event gần nhất
+docker exec influxdb influx query \
+  --org hust --token dev-token-change-me \
+  'from(bucket:"iot") |> range(start:-30m) |> filter(fn:(r) => r._measurement == "gateway_events") |> last()'
+```
+
+## Chạy unit test
+
+Unit test không cần Docker, broker hay InfluxDB thật. Chạy trực tiếp trên máy:
+
+```bash
+# Cài dependencies (một lần)
+pip install fastapi "httpx[http2]" paho-mqtt influxdb-client pydantic
+
+# Chạy tất cả test (92 test)
+python -m unittest discover -s iot_gateway -p "test_*.py" -v
+python -m unittest discover -s gateway_api -p "test_*.py" -v
+
+# Chạy từng nhóm
+python -m unittest iot_gateway.test_rule_engine -v       # rule engine 5 luật
+python -m unittest iot_gateway.test_tb_gateway -v        # ThingsBoard RPC/payload
+python -m unittest iot_gateway.test_gateway_config -v    # config runtime
+python -m unittest gateway_api.test_api -v               # REST API endpoints
+python -m unittest gateway_api.test_eta_predictor -v     # OLS ETA algorithm
+```
+
+| File | Số test | Phạm vi |
+|---|---|---|
+| `iot_gateway/test_rule_engine.py` | ~8 | 5 luật rule engine + debounce + edge-detect |
+| `iot_gateway/test_tb_gateway.py` | 27 | RPC → command, telemetry payload, shared attributes |
+| `iot_gateway/test_gateway_config.py` | 5 | Cập nhật ngưỡng runtime, validation |
+| `gateway_api/test_api.py` | 32 | Tất cả endpoint: validate, 404, 400, mock InfluxDB |
+| `gateway_api/test_eta_predictor.py` | 20 | OLS slope, biên chuỗi rỗng/1 điểm/âm/đầy |
+| **Tổng** | **92** | **Tất cả pass, không cần môi trường Docker** |
+
+## Demo nâng cao §5.17 (8/8)
+
+```bash
+# Chạy script demo tất cả 8 yêu cầu nâng cao
+bash scripts/demo-nang-cao.sh
+
+# Hoặc demo từng điểm:
+
+# #1 Lộ trình thu gom
+curl -s http://localhost:8001/collection/route | python3 -m json.tool
+
+# #4 Healthcheck 12 service
+docker compose ps --format "table {{.Name}}\t{{.Status}}"
+
+# #6 Dự báo ETA
+curl -s http://localhost:8001/bins/bin-01/eta | python3 -m json.tool
+curl -s http://localhost:8001/bins/bin-02/eta | python3 -m json.tool
+curl -s http://localhost:8001/bins/bin-03/eta | python3 -m json.tool
+
+# #7 Unit test
+python -m unittest discover -s iot_gateway -p "test_*.py" 2>&1 | tail -2
+python -m unittest discover -s gateway_api -p "test_*.py" 2>&1 | tail -2
+
+# #8 Test reconnect MQTT
+docker compose stop mosquitto
+sleep 5
+docker compose start mosquitto
+docker compose logs waste-gateway | grep -i "connect"
+```
 
 ## Dọn dẹp
 
 ```bash
-docker compose down        # Dừng containers
-docker compose down -v     # Dừng + xóa volumes (mất dữ liệu)
+# Dừng tất cả container
+docker compose down
+
+# Dừng và xóa volumes (mất toàn bộ dữ liệu InfluxDB + Grafana)
+docker compose down -v
+
+# Xóa image đã build
+docker compose down --rmi local
 ```
-
-## Kiểm thử
-
-Unit test chạy bằng `unittest` (stdlib), không cần Docker/broker/InfluxDB thật:
-
-```bash
-# Rule engine + state store (SV2)
-python -m unittest discover -s iot_gateway -p "test_*.py" -v
-
-# REST API (SV3) — cần fastapi, pydantic, influxdb-client, paho-mqtt đã cài
-python -m unittest discover -s gateway_api -p "test_*.py" -v
-```
-
-| File | Phạm vi |
-|---|---|
-| `iot_gateway/test_rule_engine.py` | Rule engine (5 luật) + state store (debounce, edge-detect, collection) |
-| `iot_gateway/test_tb_gateway.py` | RPC ThingsBoard → command, telemetry/alarm payload, shared attributes → threshold |
-| `iot_gateway/test_gateway_config.py` | `waste/gateway/config` → cập nhật `THRESHOLDS` runtime |
-| `gateway_api/test_api.py` | REST API: validate input, 404, publish command, đọc InfluxDB (mock) |
 
 ## Cấu trúc thư mục
 
 ```
 iot-waste-management/
-├── docker-compose.yml
-├── .env.example
-├── mosquitto/config/mosquitto.conf
-├── virtual_sensor/          (SV1)
-├── virtual_actuator/        (SV1)
-├── iot_gateway/             (SV2 + SV3)
-│   ├── gateway.py
-│   ├── rule_engine.py
-│   ├── influx_writer.py
-│   ├── state_store.py
-│   └── tb_gateway.py       (SV3)
-├── gateway_api/             (SV3)
-│   ├── api.py
+├── docker-compose.yml          # Định nghĩa 12 service
+├── .env.example                # Mẫu cấu hình (25 biến môi trường)
+├── mosquitto/
+│   └── config/mosquitto.conf
+├── virtual_sensor/             # SV1: cảm biến ảo
+│   ├── sensor.py
 │   ├── Dockerfile
 │   └── requirements.txt
-├── grafana/                 (SV3)
+├── virtual_actuator/           # SV1: thiết bị chấp hành ảo
+│   ├── actuator.py
+│   ├── Dockerfile
+│   └── requirements.txt
+├── iot_gateway/                # SV2 + SV3
+│   ├── gateway.py              # Edge gateway chính
+│   ├── rule_engine.py          # 5 luật phát hiện bất thường
+│   ├── state_store.py          # Quản lý trạng thái, debounce
+│   ├── influx_writer.py        # Ghi InfluxDB
+│   ├── tb_gateway.py           # ThingsBoard bridge (SV3)
+│   ├── test_rule_engine.py
+│   ├── test_tb_gateway.py
+│   └── test_gateway_config.py
+├── gateway_api/                # SV3: REST API
+│   ├── api.py                  # FastAPI — 11 endpoint
+│   ├── eta_predictor.py        # OLS linear regression module
+│   ├── test_api.py
+│   ├── test_eta_predictor.py
+│   ├── Dockerfile
+│   └── requirements.txt
+├── grafana/                    # SV3: 11 panel, provisioning tự động
 │   ├── provisioning/
 │   └── dashboards/
-├── docs/
-│   └── topic-design.md     (SV1)
-└── README.md                (SV3)
+├── thingsboard/                # SV3: Alarm Rules JSON export
+├── scripts/
+│   └── demo-nang-cao.sh        # Demo 8 yêu cầu nâng cao
+└── docs/
+    ├── kich-ban-demo.md
+    └── script-thuyet-trinh-sv3.md
 ```
+
+## Biến môi trường quan trọng
+
+| Biến | Mặc định | Mô tả |
+|---|---|---|
+| `MQTT_BROKER` | `mosquitto` | Hostname broker trong Docker network |
+| `TB_GATEWAY_TOKEN` | *(bắt buộc điền)* | Token gateway ThingsBoard Cloud |
+| `FILL_DISPATCH_THRESHOLD` | `85` | Ngưỡng fill (%) kích hoạt điều xe |
+| `TEMP_FIRE_THRESHOLD` | `60` | Nhiệt độ (°C) coi là fire_risk |
+| `METHANE_ALERT_THRESHOLD` | `500` | Methane (ppm) phát cảnh báo |
+| `SENSOR_OFFLINE_TIMEOUT` | `30` | Giây không nhận telemetry → offline |
+| `WEBHOOK_URL` | *(trống)* | URL nhận HTTP POST khi có event critical |
+| `WEBHOOK_SEVERITY` | `critical` | `critical` / `warning` / `all` |
+
+Xem đầy đủ 25 biến tại [`.env.example`](.env.example).
